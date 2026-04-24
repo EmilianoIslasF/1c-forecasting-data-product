@@ -1,1 +1,4 @@
-
+item_id,shop_id,fecha_mes,valor_predicho,valor_real,rmse
+1,1,01/01/2024,100,90,10
+2,1,01/01/2024,50,55,5
+3,2,01/01/2024,80,70,10
