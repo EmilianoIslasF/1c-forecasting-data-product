@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Foundation stack for forecasting-data-product.
+  Creates the data lake bucket, Glue Catalog databases and ECR repository.
+
+Parameters:
+
+  ProjectName:
+    Type: String
+    Default: forecasting-data-product
+    Description: Project name used for tags and resource names.
+
+  DataBucketName:
+    Type: String
+    Default: 1c-forecasting-data-product
+    Description: S3 bucket for raw, bronze, silver, gold and artifacts.
+
+  CreateDataBucket:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >
+      Set to false if the bucket already exists and was created manually.
+
+Conditions:
+
+  ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
+
+Resources:
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateDataBucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref DataBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Layer
+          Value: data-lake
+
+  BronzeDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: forecasting_bronze
+        Description: Bronze layer for raw 1C forecasting datasets.
+
+  SilverDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: forecasting_silver
+        Description: Silver layer for cleaned and aggregated forecasting datasets.
+
+  GoldDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: forecasting_gold
+        Description: Gold layer for analytics-ready forecasting datasets.
+
+  StreamlitECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${ProjectName}-streamlit'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+Outputs:
+
+  DataBucketName:
+    Description: S3 bucket used by the data lake.
+    Value: !Ref DataBucketName
+
+  BronzeDatabaseName:
+    Description: Glue database for Bronze tables.
+    Value: !Ref BronzeDatabase
+
+  SilverDatabaseName:
+    Description: Glue database for Silver tables.
+    Value: !Ref SilverDatabase
+
+  GoldDatabaseName:
+    Description: Glue database for Gold tables.
+    Value: !Ref GoldDatabase
+
+  StreamlitECRRepositoryUri:
+    Description: ECR repository URI for the future Streamlit app image.
+    Value: !GetAtt StreamlitECRRepository.RepositoryUri
+
