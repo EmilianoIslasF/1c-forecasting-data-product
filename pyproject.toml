@@ -9,5 +9,7 @@ dependencies = [
     "boto3>=1.42.97",
     "kaggle>=2.1.0",
     "pandas>=3.0.2",
+    "psycopg2-binary>=2.9.12",
     "pyarrow>=23.0.1",
+    "sqlalchemy>=2.0.49",
 ]
