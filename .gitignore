@@ -1,0 +1,80 @@
+# =========================
+# Data
+# =========================
+data/
+*.csv
+*.parquet
+*.snappy.parquet
+*.zip
+*.gz
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Virtual environments
+# =========================
+.venv/
+venv/
+env/
+
+# =========================
+# Jupyter / SageMaker
+# =========================
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+.sagemaker/
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# Secrets / credentials
+# =========================
+.env
+.env.*
+*.pem
+*.key
+*.crt
+credentials.json
+secrets.json
+
+# Kaggle credentials
+.kaggle/
+kaggle.json
+
+# AWS local config, por si accidentalmente queda dentro del repo
+.aws/
+config
+credentials
+
+# =========================
+# Model / ML artifacts grandes
+# =========================
+*.joblib
+*.pkl
+*.pickle
+*.h5
+*.keras
+*.pt
+*.pth
+*.onnx
+
+# =========================
+# OS / editor
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

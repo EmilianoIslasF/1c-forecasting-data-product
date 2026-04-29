@@ -12,7 +12,7 @@ Parameters:
 
   DataBucketName:
     Type: String
-    Default: 1c-forecasting-data-product
+    Default: forecasting-data-product
     Description: S3 bucket for raw, bronze, silver, gold and artifacts.
 
   CreateDataBucket:
