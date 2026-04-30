@@ -259,30 +259,99 @@ def sidebar_filters(forecast_df: pd.DataFrame) -> tuple[list[str], list[int], li
 
 def page_overview() -> None:
     st.title("Forecasting Data Product")
-    st.caption("MVP para planeación de demanda, finanzas y operaciones.")
+    st.caption("MVP de planeación de demanda mensual para retail.")
 
     model_metrics_global = read_gold_table("model_metrics_global")
     model_metrics_by_category = read_gold_table("model_metrics_by_category")
     category_monthly = read_gold_table("category_monthly")
     product_kpis = read_gold_table("product_kpis")
+    forecast = read_gold_table("model_forecast_next_month")
 
     metric_row = model_metrics_global.iloc[0]
 
+    model_name = str(metric_row.get("model_name", "GradientBoostingRegressor"))
+    feature_set = str(metric_row.get("feature_set", "task_01_original_features"))
+
+    actual_total = float(metric_row["actual_total"])
+    predicted_total = float(metric_row["model_prediction_total"])
+    total_gap = predicted_total - actual_total
+    total_gap_pct = (total_gap / actual_total) * 100 if actual_total != 0 else 0
+
+    st.markdown(
+        """
+        ### ¿Qué resuelve este producto?
+
+        Este MVP convierte ventas históricas en **pronósticos mensuales de demanda**
+        a nivel **tienda-producto**. La aplicación permite que un usuario de negocio
+        consulte demanda esperada, revise desempeño del modelo y deje feedback operativo
+        desde una URL pública.
+
+        Las predicciones se calculan fuera de la app y se guardan en la capa **Gold**.
+        Streamlit solo consulta resultados ya preparados, lo que hace que el dashboard
+        sea rápido y estable.
+        """
+    )
+
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Filas evaluación", f"{metric_row['n_rows']:,.0f}")
-    c2.metric("MAE modelo", f"{metric_row['model_mae']:.3f}")
-    c3.metric("MAE baseline", f"{metric_row['baseline_mae']:.3f}")
-    c4.metric("Mejora MAE", f"{metric_row['mae_improvement']:.3f}")
+    c1.metric("MAE modelo", f"{metric_row['model_mae']:.3f}")
+    c2.metric("RMSE modelo", f"{metric_row['model_rmse']:.3f}")
+    c3.metric("R² modelo", f"{metric_row['model_r2']:.3f}")
+    c4.metric("Filas evaluación", f"{metric_row['n_rows']:,.0f}")
 
-    c5, c6, c7, c8 = st.columns(4)
+    c5, c6, c7 = st.columns(3)
 
-    c5.metric("RMSE modelo", f"{metric_row['model_rmse']:.3f}")
-    c6.metric("RMSE baseline", f"{metric_row['baseline_rmse']:.3f}")
-    c7.metric("Mejora RMSE", f"{metric_row['rmse_improvement']:.3f}")
-    c8.metric("R² modelo", f"{metric_row['model_r2']:.3f}")
+    c5.metric("Demanda real validación", f"{actual_total:,.0f}")
+    c6.metric("Demanda predicha validación", f"{predicted_total:,.0f}")
+    c7.metric("Diferencia agregada", f"{total_gap:,.0f}", f"{total_gap_pct:.1f}%")
 
-    st.subheader("Demanda mensual por categoría")
+    st.info(
+        f"Modelo final: **{model_name}**. "
+        f"Feature set: **{feature_set}**. "
+        "Las métricas se calculan usando el último mes histórico como validación."
+    )
+
+    st.markdown(
+        """
+        ### Hallazgos principales
+
+        - La demanda es muy dispersa: muchas combinaciones tienda-producto tienen demanda esperada menor a 1 unidad mensual.
+        - Por eso, la vista más útil para planeación no es solo la fila granular, sino la demanda agregada por categoría, tienda o producto.
+        - El modelo permite identificar dónde se concentra la demanda esperada y dónde conviene revisar errores o productos problemáticos.
+        """
+    )
+
+    st.subheader("Demanda esperada del siguiente mes por categoría")
+
+    forecast_by_category = (
+        forecast.groupby(["category_id", "category_name"], as_index=False)
+        .agg(
+            predicted_demand=("model_prediction", "sum"),
+            avg_prediction=("model_prediction", "mean"),
+            shop_item_pairs=("item_id", "size"),
+            unique_items=("item_id", "nunique"),
+            unique_shops=("shop_id", "nunique"),
+        )
+        .sort_values("predicted_demand", ascending=False)
+        .head(15)
+    )
+
+    fig_forecast = px.bar(
+        forecast_by_category,
+        x="predicted_demand",
+        y="category_name",
+        orientation="h",
+        title="Top 15 categorías por demanda esperada",
+        labels={
+            "predicted_demand": "Demanda esperada",
+            "category_name": "Categoría",
+        },
+    )
+    fig_forecast.update_layout(yaxis={"categoryorder": "total ascending"})
+
+    st.plotly_chart(fig_forecast, use_container_width=True)
+
+    st.subheader("Demanda histórica mensual de categorías principales")
 
     top_categories = (
         category_monthly.groupby("category_name", as_index=False)
@@ -297,124 +366,74 @@ def page_overview() -> None:
         category_monthly["category_name"].isin(selected_categories)
     ].copy()
 
-    fig = px.line(
+    fig_history = px.line(
         chart_data,
         x="year_month",
         y="total_item_cnt_month_clipped",
         color="category_name",
         markers=True,
-        title="Top 10 categorías por demanda histórica",
+        title="Demanda histórica mensual: top 10 categorías",
+        labels={
+            "year_month": "Mes",
+            "total_item_cnt_month_clipped": "Unidades vendidas",
+            "category_name": "Categoría",
+        },
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig_history, use_container_width=True)
 
-    st.subheader("Modelo vs baseline por categoría")
+    left, right = st.columns(2)
 
-    st.dataframe(
-        model_metrics_by_category[
-            [
-                "category_id",
-                "category_name",
-                "n_rows",
-                "actual_total",
-                "model_prediction_total",
-                "baseline_prediction_total",
-                "model_mae",
-                "baseline_mae",
-                "mae_improvement",
-                "model_rmse",
-                "baseline_rmse",
-                "rmse_improvement",
-            ]
-        ].sort_values("rmse_improvement", ascending=False),
-        use_container_width=True,
-        hide_index=True,
-    )
+    with left:
+        st.subheader("Categorías con mayor demanda esperada")
+        st.dataframe(
+            forecast_by_category[
+                [
+                    "category_id",
+                    "category_name",
+                    "predicted_demand",
+                    "avg_prediction",
+                    "shop_item_pairs",
+                    "unique_items",
+                    "unique_shops",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
-    st.subheader("Productos principales")
-
-    st.dataframe(
-        product_kpis.sort_values("total_item_cnt_month_clipped", ascending=False)
-        .head(50)[
-            [
-                "item_id",
-                "item_name",
-                "category_name",
-                "total_item_cnt_month_clipped",
-                "total_revenue_month",
-                "active_months",
-                "active_shops",
-                "avg_sales_per_active_month",
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
-
+    with right:
+        st.subheader("Productos históricamente más relevantes")
+        st.dataframe(
+            product_kpis.sort_values("total_item_cnt_month_clipped", ascending=False)
+            .head(20)[
+                [
+                    "item_id",
+                    "item_name",
+                    "category_name",
+                    "total_item_cnt_month_clipped",
+                    "total_revenue_month",
+                    "active_months",
+                    "active_shops",
+                ]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 def page_forecast() -> None:
     st.title("Pronóstico siguiente mes")
-    st.caption("Forecast baseline precalculado en Gold para el mes siguiente al entrenamiento.")
-
-    forecast = read_gold_table("baseline_forecast_next_month")
-
-    selected_categories, selected_shops, selected_items = sidebar_filters(forecast)
-
-    filtered = forecast.copy()
-
-    if selected_categories:
-        filtered = filtered[
-            filtered["category_name"].astype(str).isin(selected_categories)
-        ]
-
-    if selected_shops:
-        filtered = filtered[filtered["shop_id"].isin(selected_shops)]
-
-    if selected_items:
-        filtered = filtered[filtered["item_id"].isin(selected_items)]
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric("Filas filtradas", f"{len(filtered):,.0f}")
-    c2.metric("Predicción total", f"{filtered['baseline_prediction'].sum():,.0f}")
-    c3.metric("Productos únicos", f"{filtered['item_id'].nunique():,.0f}")
-
-    st.subheader("Tabla de pronósticos")
-
-    st.dataframe(
-        filtered[
-            [
-                "id",
-                "prediction_month",
-                "shop_id",
-                "shop_name",
-                "item_id",
-                "item_name",
-                "category_id",
-                "category_name",
-                "baseline_last_month",
-                "baseline_3_month_avg",
-                "baseline_prediction",
-            ]
-        ].sort_values("baseline_prediction", ascending=False),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    csv = filtered.to_csv(index=False).encode("utf-8")
-
-    st.download_button(
-        label="Descargar forecast filtrado CSV",
-        data=csv,
-        file_name="forecast_next_month.csv",
-        mime="text/csv",
-    )
-def page_forecast() -> None:
-    st.title("Pronóstico siguiente mes")
-    st.caption("Forecast precalculado por el modelo y comparación contra baseline naive.")
+    st.caption("Predicción mensual de demanda generada por el modelo final.")
 
     forecast = read_gold_table("model_forecast_next_month")
 
+    st.info(
+        "Las predicciones representan demanda esperada mensual por combinación tienda-producto. "
+        "En productos de baja rotación es normal observar valores menores a 1. "
+        "Para planeación, las vistas agregadas por categoría, tienda o producto son más útiles "
+        "que una fila individual."
+    )
+
     selected_categories, selected_shops, selected_items = sidebar_filters(forecast)
 
     filtered = forecast.copy()
@@ -430,36 +449,172 @@ def page_forecast() -> None:
     if selected_items:
         filtered = filtered[filtered["item_id"].isin(selected_items)]
 
+    total_prediction = filtered["model_prediction"].sum()
+    avg_prediction = filtered["model_prediction"].mean() if len(filtered) else 0
+    pairs_over_one = (filtered["model_prediction"] >= 1).sum()
+    pairs_over_half = (filtered["model_prediction"] >= 0.5).sum()
+
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Filas filtradas", f"{len(filtered):,.0f}")
-    c2.metric("Predicción modelo", f"{filtered['model_prediction'].sum():,.0f}")
-    c3.metric("Predicción baseline", f"{filtered['baseline_prediction'].sum():,.0f}")
-    c4.metric("Productos únicos", f"{filtered['item_id'].nunique():,.0f}")
+    c1.metric("Demanda esperada total", f"{total_prediction:,.1f}")
+    c2.metric("Promedio tienda-producto", f"{avg_prediction:.3f}")
+    c3.metric("Combinaciones ≥ 1 unidad", f"{pairs_over_one:,.0f}")
+    c4.metric("Combinaciones ≥ 0.5 unidad", f"{pairs_over_half:,.0f}")
 
-    st.subheader("Tabla de pronósticos")
-
-    st.dataframe(
-        filtered[
-            [
-                "prediction_month",
-                "shop_id",
-                "item_id",
-                "item_name",
-                "category_id",
-                "category_name",
-                "model_prediction",
-                "baseline_prediction",
-                "lag_1",
-                "lag_mean_3",
-                "lag_mean_6",
-                "had_sales_lag_1",
-                "had_sales_lag_3",
-            ]
-        ].sort_values("model_prediction", ascending=False),
-        use_container_width=True,
-        hide_index=True,
+    tab_category, tab_shop, tab_product, tab_detail = st.tabs(
+        [
+            "Por categoría",
+            "Por tienda",
+            "Top productos",
+            "Detalle tienda-producto",
+        ]
     )
+
+    with tab_category:
+        st.subheader("Pronóstico agregado por categoría")
+
+        by_category = (
+            filtered.groupby(["category_id", "category_name"], as_index=False)
+            .agg(
+                predicted_demand=("model_prediction", "sum"),
+                avg_prediction=("model_prediction", "mean"),
+                shop_item_pairs=("item_id", "size"),
+                unique_items=("item_id", "nunique"),
+                unique_shops=("shop_id", "nunique"),
+            )
+            .sort_values("predicted_demand", ascending=False)
+        )
+
+        fig = px.bar(
+            by_category.head(20),
+            x="predicted_demand",
+            y="category_name",
+            orientation="h",
+            title="Top 20 categorías por demanda esperada",
+            labels={
+                "predicted_demand": "Demanda esperada",
+                "category_name": "Categoría",
+            },
+        )
+        fig.update_layout(yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.dataframe(
+            by_category,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with tab_shop:
+        st.subheader("Pronóstico agregado por tienda")
+
+        group_cols = ["shop_id"]
+
+        if "shop_name" in filtered.columns and filtered["shop_name"].astype(str).str.len().sum() > 0:
+            group_cols.append("shop_name")
+
+        by_shop = (
+            filtered.groupby(group_cols, as_index=False)
+            .agg(
+                predicted_demand=("model_prediction", "sum"),
+                avg_prediction=("model_prediction", "mean"),
+                shop_item_pairs=("item_id", "size"),
+                unique_items=("item_id", "nunique"),
+                unique_categories=("category_id", "nunique"),
+            )
+            .sort_values("predicted_demand", ascending=False)
+        )
+
+        label_col = "shop_name" if "shop_name" in by_shop.columns else "shop_id"
+
+        fig = px.bar(
+            by_shop.head(20),
+            x="predicted_demand",
+            y=label_col,
+            orientation="h",
+            title="Top tiendas por demanda esperada",
+            labels={
+                "predicted_demand": "Demanda esperada",
+                label_col: "Tienda",
+            },
+        )
+        fig.update_layout(yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.dataframe(
+            by_shop,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with tab_product:
+        st.subheader("Top productos por demanda esperada")
+
+        by_product = (
+            filtered.groupby(
+                [
+                    "item_id",
+                    "item_name",
+                    "category_id",
+                    "category_name",
+                ],
+                as_index=False,
+            )
+            .agg(
+                predicted_demand=("model_prediction", "sum"),
+                avg_prediction=("model_prediction", "mean"),
+                active_shops=("shop_id", "nunique"),
+                shop_item_pairs=("shop_id", "size"),
+                last_month_demand=("lag_1", "sum"),
+                recent_avg_demand=("lag_mean_3", "sum"),
+            )
+            .sort_values("predicted_demand", ascending=False)
+        )
+
+        st.dataframe(
+            by_product.head(100),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with tab_detail:
+        st.subheader("Detalle granular tienda-producto")
+
+        st.caption(
+            "Esta tabla es para auditoría y drill-down. "
+            "Un valor como 0.35 significa demanda esperada mensual, "
+            "no una orden física redondeada."
+        )
+
+        detail = filtered.copy()
+
+        for col in ["model_prediction", "lag_1", "lag_mean_3", "lag_mean_6"]:
+            if col in detail.columns:
+                detail[col] = detail[col].round(4)
+
+        columns = [
+            "prediction_month",
+            "shop_id",
+            "item_id",
+            "item_name",
+            "category_id",
+            "category_name",
+            "model_prediction",
+            "lag_1",
+            "lag_mean_3",
+            "lag_mean_6",
+        ]
+
+        if "shop_name" in detail.columns and detail["shop_name"].astype(str).str.len().sum() > 0:
+            columns.insert(2, "shop_name")
+
+        st.dataframe(
+            detail[columns]
+            .sort_values("model_prediction", ascending=False)
+            .head(1000),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     csv = filtered.to_csv(index=False).encode("utf-8")
 
@@ -471,54 +626,135 @@ def page_forecast() -> None:
     )
 
 def page_evaluation() -> None:
-    st.title("Evaluación del baseline")
-    st.caption("Comparación entre último mes real y predicción naive del mes anterior.")
+    st.title("Evaluación del modelo")
+    st.caption("Validación del modelo sobre el último mes histórico disponible.")
 
-    evaluation = read_gold_table("baseline_evaluation")
-    category_metrics = read_gold_table("baseline_metrics_by_category")
+    evaluation = read_gold_table("model_evaluation")
+    category_metrics = read_gold_table("model_metrics_by_category")
+    global_metrics = read_gold_table("model_metrics_global")
 
-    c1, c2, c3 = st.columns(3)
+    metric_row = global_metrics.iloc[0]
+
+    st.markdown(
+        """
+        Esta sección resume qué tan bien el modelo reproduce la demanda observada
+        en el último mes histórico. La vista principal se concentra en el modelo final;
+        la comparación contra baseline queda como referencia técnica.
+        """
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
 
     c1.metric("Filas evaluación", f"{len(evaluation):,.0f}")
-    c2.metric("MAE promedio", f"{evaluation['absolute_error'].mean():.3f}")
-    c3.metric("RMSE", f"{(evaluation['squared_error'].mean() ** 0.5):.3f}")
+    c2.metric("MAE modelo", f"{metric_row['model_mae']:.3f}")
+    c3.metric("RMSE modelo", f"{metric_row['model_rmse']:.3f}")
+    c4.metric("R² modelo", f"{metric_row['model_r2']:.3f}")
 
-    st.subheader("Actual vs predicción por categoría")
+    actual_total = float(metric_row["actual_total"])
+    predicted_total = float(metric_row["model_prediction_total"])
+    total_gap = predicted_total - actual_total
+    total_gap_pct = (total_gap / actual_total) * 100 if actual_total != 0 else 0
+
+    c5, c6, c7 = st.columns(3)
+
+    c5.metric("Demanda real", f"{actual_total:,.0f}")
+    c6.metric("Demanda predicha", f"{predicted_total:,.0f}")
+    c7.metric("Diferencia agregada", f"{total_gap:,.0f}", f"{total_gap_pct:.1f}%")
+
+    st.subheader("Demanda real vs demanda predicha por categoría")
 
     fig = px.scatter(
         category_metrics,
         x="actual_total",
-        y="prediction_total",
-        size="n_shop_item_pairs",
+        y="model_prediction_total",
+        size="n_rows",
         color="category_name",
         hover_name="category_name",
-        title="Actual total vs predicción total por categoría",
+        title="Demanda real vs predicción del modelo",
+        labels={
+            "actual_total": "Demanda real",
+            "model_prediction_total": "Demanda predicha",
+            "n_rows": "Combinaciones",
+            "category_name": "Categoría",
+        },
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Detalle de evaluación")
+    st.subheader("Categorías con mayor error agregado")
+
+    clean_metrics = category_metrics.copy()
+    clean_metrics["absolute_total_error"] = (
+        clean_metrics["model_prediction_total"] - clean_metrics["actual_total"]
+    ).abs()
+
+    st.dataframe(
+        clean_metrics[
+            [
+                "category_id",
+                "category_name",
+                "n_rows",
+                "actual_total",
+                "model_prediction_total",
+                "absolute_total_error",
+                "model_mae",
+                "model_rmse",
+                "model_bias",
+            ]
+        ].sort_values("absolute_total_error", ascending=False),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("Casos individuales con mayor error")
 
     st.dataframe(
         evaluation[
             [
+                "date_block_num",
                 "shop_id",
-                "shop_name",
                 "item_id",
                 "item_name",
                 "category_id",
                 "category_name",
                 "actual_item_cnt_month",
-                "baseline_prediction",
-                "error",
-                "absolute_error",
-                "squared_error",
+                "model_prediction",
+                "model_error",
+                "model_absolute_error",
             ]
-        ].sort_values("absolute_error", ascending=False).head(500),
+        ].sort_values("model_absolute_error", ascending=False).head(500),
         use_container_width=True,
         hide_index=True,
     )
 
+    with st.expander("Ver comparación técnica contra baseline"):
+        st.write(
+            "Esta sección se conserva para auditoría técnica. "
+            "La app ejecutiva usa el modelo final como resultado principal."
+        )
+
+        cols = [
+            "validation_date_block_num",
+            "model_mae",
+            "baseline_mae",
+            "model_rmse",
+            "baseline_rmse",
+            "model_r2",
+            "baseline_r2",
+            "actual_total",
+            "model_prediction_total",
+            "baseline_prediction_total",
+            "mae_improvement",
+            "rmse_improvement",
+        ]
+
+        available_cols = [col for col in cols if col in global_metrics.columns]
+
+        st.dataframe(
+            global_metrics[available_cols],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 def page_feedback() -> None:
     st.title("Feedback de negocio")
@@ -571,84 +807,6 @@ def page_feedback() -> None:
         st.info("Todavía no hay feedback o RDS_ENDPOINT no está configurado.")
     else:
         st.dataframe(feedback, use_container_width=True, hide_index=True)
-def page_evaluation() -> None:
-    st.title("Evaluación del modelo")
-    st.caption("Comparación del modelo entrenado contra baseline naive.")
-
-    evaluation = read_gold_table("model_evaluation")
-    category_metrics = read_gold_table("model_metrics_by_category")
-    global_metrics = read_gold_table("model_metrics_global")
-
-    metric_row = global_metrics.iloc[0]
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    c1.metric("Filas evaluación", f"{len(evaluation):,.0f}")
-    c2.metric("MAE modelo", f"{metric_row['model_mae']:.3f}")
-    c3.metric("MAE baseline", f"{metric_row['baseline_mae']:.3f}")
-    c4.metric("Mejora MAE", f"{metric_row['mae_improvement']:.3f}")
-
-    st.subheader("Actual vs predicción por categoría")
-
-    fig = px.scatter(
-        category_metrics,
-        x="actual_total",
-        y="model_prediction_total",
-        size="n_rows",
-        color="category_name",
-        hover_name="category_name",
-        title="Actual total vs predicción del modelo por categoría",
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("Modelo vs baseline por categoría")
-
-    st.dataframe(
-        category_metrics[
-            [
-                "category_id",
-                "category_name",
-                "n_rows",
-                "actual_total",
-                "model_prediction_total",
-                "baseline_prediction_total",
-                "model_mae",
-                "baseline_mae",
-                "mae_improvement",
-                "model_rmse",
-                "baseline_rmse",
-                "rmse_improvement",
-            ]
-        ].sort_values("rmse_improvement", ascending=False),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.subheader("Casos con mayor error del modelo")
-
-    st.dataframe(
-        evaluation[
-            [
-                "date_block_num",
-                "shop_id",
-                "item_id",
-                "item_name",
-                "category_id",
-                "category_name",
-                "actual_item_cnt_month",
-                "model_prediction",
-                "baseline_prediction",
-                "model_error",
-                "baseline_error",
-                "model_absolute_error",
-                "baseline_absolute_error",
-            ]
-        ].sort_values("model_absolute_error", ascending=False).head(500),
-        use_container_width=True,
-        hide_index=True,
-    )
-
 def page_flagged_products() -> None:
     st.title("Productos marcados con problemas")
     st.caption("Lista operacional para que el equipo de ML investigue casos problemáticos.")
