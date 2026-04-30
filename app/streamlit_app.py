@@ -258,22 +258,29 @@ def sidebar_filters(forecast_df: pd.DataFrame) -> tuple[list[str], list[int], li
 
 
 def page_overview() -> None:
-    st.title("📈 Forecasting Data Product")
+    st.title("Forecasting Data Product")
     st.caption("MVP para planeación de demanda, finanzas y operaciones.")
 
-    metrics_global = read_gold_table("baseline_metrics_global")
-    category_metrics = read_gold_table("baseline_metrics_by_category")
+    model_metrics_global = read_gold_table("model_metrics_global")
+    model_metrics_by_category = read_gold_table("model_metrics_by_category")
     category_monthly = read_gold_table("category_monthly")
     product_kpis = read_gold_table("product_kpis")
 
-    metric_row = metrics_global.iloc[0]
+    metric_row = model_metrics_global.iloc[0]
 
     c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Shop-item pairs evaluados", f"{metric_row['n_shop_item_pairs']:,.0f}")
-    c2.metric("MAE baseline", f"{metric_row['mae']:.3f}")
-    c3.metric("RMSE baseline", f"{metric_row['rmse']:.3f}")
-    c4.metric("Bias baseline", f"{metric_row['bias']:.3f}")
+    c1.metric("Filas evaluación", f"{metric_row['n_rows']:,.0f}")
+    c2.metric("MAE modelo", f"{metric_row['model_mae']:.3f}")
+    c3.metric("MAE baseline", f"{metric_row['baseline_mae']:.3f}")
+    c4.metric("Mejora MAE", f"{metric_row['mae_improvement']:.3f}")
+
+    c5, c6, c7, c8 = st.columns(4)
+
+    c5.metric("RMSE modelo", f"{metric_row['model_rmse']:.3f}")
+    c6.metric("RMSE baseline", f"{metric_row['baseline_rmse']:.3f}")
+    c7.metric("Mejora RMSE", f"{metric_row['rmse_improvement']:.3f}")
+    c8.metric("R² modelo", f"{metric_row['model_r2']:.3f}")
 
     st.subheader("Demanda mensual por categoría")
 
@@ -301,23 +308,25 @@ def page_overview() -> None:
 
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Categorías con mayor error del baseline")
-
-    category_metrics_sorted = category_metrics.sort_values("rmse", ascending=False)
+    st.subheader("Modelo vs baseline por categoría")
 
     st.dataframe(
-        category_metrics_sorted[
+        model_metrics_by_category[
             [
                 "category_id",
                 "category_name",
-                "n_shop_item_pairs",
+                "n_rows",
                 "actual_total",
-                "prediction_total",
-                "mae",
-                "rmse",
-                "bias",
+                "model_prediction_total",
+                "baseline_prediction_total",
+                "model_mae",
+                "baseline_mae",
+                "mae_improvement",
+                "model_rmse",
+                "baseline_rmse",
+                "rmse_improvement",
             ]
-        ],
+        ].sort_values("rmse_improvement", ascending=False),
         use_container_width=True,
         hide_index=True,
     )
@@ -344,7 +353,7 @@ def page_overview() -> None:
 
 
 def page_forecast() -> None:
-    st.title("🔮 Pronóstico siguiente mes")
+    st.title("Pronóstico siguiente mes")
     st.caption("Forecast baseline precalculado en Gold para el mes siguiente al entrenamiento.")
 
     forecast = read_gold_table("baseline_forecast_next_month")
@@ -400,10 +409,69 @@ def page_forecast() -> None:
         file_name="forecast_next_month.csv",
         mime="text/csv",
     )
+def page_forecast() -> None:
+    st.title("Pronóstico siguiente mes")
+    st.caption("Forecast precalculado por el modelo y comparación contra baseline naive.")
 
+    forecast = read_gold_table("model_forecast_next_month")
+
+    selected_categories, selected_shops, selected_items = sidebar_filters(forecast)
+
+    filtered = forecast.copy()
+
+    if selected_categories:
+        filtered = filtered[
+            filtered["category_name"].astype(str).isin(selected_categories)
+        ]
+
+    if selected_shops:
+        filtered = filtered[filtered["shop_id"].isin(selected_shops)]
+
+    if selected_items:
+        filtered = filtered[filtered["item_id"].isin(selected_items)]
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("Filas filtradas", f"{len(filtered):,.0f}")
+    c2.metric("Predicción modelo", f"{filtered['model_prediction'].sum():,.0f}")
+    c3.metric("Predicción baseline", f"{filtered['baseline_prediction'].sum():,.0f}")
+    c4.metric("Productos únicos", f"{filtered['item_id'].nunique():,.0f}")
+
+    st.subheader("Tabla de pronósticos")
+
+    st.dataframe(
+        filtered[
+            [
+                "prediction_month",
+                "shop_id",
+                "item_id",
+                "item_name",
+                "category_id",
+                "category_name",
+                "model_prediction",
+                "baseline_prediction",
+                "lag_1",
+                "lag_mean_3",
+                "lag_mean_6",
+                "had_sales_lag_1",
+                "had_sales_lag_3",
+            ]
+        ].sort_values("model_prediction", ascending=False),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    csv = filtered.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Descargar forecast filtrado CSV",
+        data=csv,
+        file_name="model_forecast_next_month.csv",
+        mime="text/csv",
+    )
 
 def page_evaluation() -> None:
-    st.title("📊 Evaluación del baseline")
+    st.title("Evaluación del baseline")
     st.caption("Comparación entre último mes real y predicción naive del mes anterior.")
 
     evaluation = read_gold_table("baseline_evaluation")
@@ -453,7 +521,7 @@ def page_evaluation() -> None:
 
 
 def page_feedback() -> None:
-    st.title("📝 Feedback de negocio")
+    st.title("Feedback de negocio")
     st.caption("Captura observaciones del equipo de negocio sobre productos o categorías.")
 
     with st.form("feedback_form"):
@@ -503,10 +571,86 @@ def page_feedback() -> None:
         st.info("Todavía no hay feedback o RDS_ENDPOINT no está configurado.")
     else:
         st.dataframe(feedback, use_container_width=True, hide_index=True)
+def page_evaluation() -> None:
+    st.title("Evaluación del modelo")
+    st.caption("Comparación del modelo entrenado contra baseline naive.")
 
+    evaluation = read_gold_table("model_evaluation")
+    category_metrics = read_gold_table("model_metrics_by_category")
+    global_metrics = read_gold_table("model_metrics_global")
+
+    metric_row = global_metrics.iloc[0]
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("Filas evaluación", f"{len(evaluation):,.0f}")
+    c2.metric("MAE modelo", f"{metric_row['model_mae']:.3f}")
+    c3.metric("MAE baseline", f"{metric_row['baseline_mae']:.3f}")
+    c4.metric("Mejora MAE", f"{metric_row['mae_improvement']:.3f}")
+
+    st.subheader("Actual vs predicción por categoría")
+
+    fig = px.scatter(
+        category_metrics,
+        x="actual_total",
+        y="model_prediction_total",
+        size="n_rows",
+        color="category_name",
+        hover_name="category_name",
+        title="Actual total vs predicción del modelo por categoría",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Modelo vs baseline por categoría")
+
+    st.dataframe(
+        category_metrics[
+            [
+                "category_id",
+                "category_name",
+                "n_rows",
+                "actual_total",
+                "model_prediction_total",
+                "baseline_prediction_total",
+                "model_mae",
+                "baseline_mae",
+                "mae_improvement",
+                "model_rmse",
+                "baseline_rmse",
+                "rmse_improvement",
+            ]
+        ].sort_values("rmse_improvement", ascending=False),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("Casos con mayor error del modelo")
+
+    st.dataframe(
+        evaluation[
+            [
+                "date_block_num",
+                "shop_id",
+                "item_id",
+                "item_name",
+                "category_id",
+                "category_name",
+                "actual_item_cnt_month",
+                "model_prediction",
+                "baseline_prediction",
+                "model_error",
+                "baseline_error",
+                "model_absolute_error",
+                "baseline_absolute_error",
+            ]
+        ].sort_values("model_absolute_error", ascending=False).head(500),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 def page_flagged_products() -> None:
-    st.title("🚩 Productos marcados con problemas")
+    st.title("Productos marcados con problemas")
     st.caption("Lista operacional para que el equipo de ML investigue casos problemáticos.")
 
     with st.form("flag_form"):

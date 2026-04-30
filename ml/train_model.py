@@ -5,35 +5,37 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import awswrangler as wr
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
 LOGGER = logging.getLogger(__name__)
 
+TARGET_COL = "item_cnt_month"
+CLIP_MIN = 0
+CLIP_MAX = 20
+SEED = 42
 
 FEATURE_COLUMNS = [
+    "date_block_num",
     "shop_id",
     "item_id",
-    "category_id",
+    "item_category_id",
     "month",
-    "lag_1",
-    "lag_2",
-    "lag_3",
-    "lag_6",
-    "lag_12",
-    "lag_mean_3",
-    "lag_mean_6",
-    "had_sales_lag_1",
-    "had_sales_lag_3",
+    "year",
+    "item_cnt_month_lag_1",
+    "item_cnt_month_lag_2",
+    "item_cnt_month_lag_3",
+    "item_cnt_month_lag_6",
+    "item_cnt_month_lag_12",
 ]
-
-TARGET_COLUMN = "item_cnt_month"
 
 
 def configure_logging() -> None:
@@ -45,58 +47,21 @@ def configure_logging() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train ML model and write forecasts to Gold."
+        description="Train original GradientBoostingRegressor model and write outputs to Gold."
     )
 
-    parser.add_argument(
-        "--bucket",
-        required=True,
-        help="S3 bucket where model artifacts and Gold tables will be stored.",
-    )
+    parser.add_argument("--bucket", required=True)
+    parser.add_argument("--ml-database", default="forecasting_ml")
+    parser.add_argument("--gold-database", default="forecasting_gold")
+    parser.add_argument("--gold-prefix", default="forecasting/gold")
+    parser.add_argument("--artifacts-prefix", default="forecasting/artifacts/models")
+    parser.add_argument("--local-model-dir", default="artifacts/models")
 
-    parser.add_argument(
-        "--ml-database",
-        default="forecasting_ml",
-        help="Glue database with ML feature tables.",
-    )
-
-    parser.add_argument(
-        "--gold-database",
-        default="forecasting_gold",
-        help="Glue database for model outputs.",
-    )
-
-    parser.add_argument(
-        "--gold-prefix",
-        default="forecasting/gold",
-        help="S3 prefix for Gold model output tables.",
-    )
-
-    parser.add_argument(
-        "--artifacts-prefix",
-        default="forecasting/artifacts/models",
-        help="S3 prefix for model artifacts.",
-    )
-
-    parser.add_argument(
-        "--local-model-dir",
-        default="artifacts/models",
-        help="Local directory to save model.joblib and metrics.json.",
-    )
-
-    parser.add_argument(
-        "--max-train-rows",
-        type=int,
-        default=1_500_000,
-        help="Maximum training rows sampled for faster MVP training.",
-    )
-
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed.",
-    )
+    parser.add_argument("--alpha", type=float, default=1.0)
+    parser.add_argument("--n-estimators", type=int, default=100)
+    parser.add_argument("--learning-rate", type=float, default=0.05)
+    parser.add_argument("--max-depth", type=int, default=4)
+    parser.add_argument("--seed", type=int, default=SEED)
 
     return parser.parse_args()
 
@@ -109,10 +74,10 @@ def read_table(database: str, table: str) -> pd.DataFrame:
         table=table,
     )
 
-    assert not df.empty, f"Table {database}.{table} is empty"
+    assert not df.empty, f"{database}.{table} is empty"
 
     LOGGER.info(
-        "Loaded %s.%s with %s rows and %s columns",
+        "Loaded %s.%s rows=%s cols=%s",
         database,
         table,
         len(df),
@@ -122,94 +87,87 @@ def read_table(database: str, table: str) -> pd.DataFrame:
     return df
 
 
-def validate_features(df: pd.DataFrame, table_name: str, require_target: bool) -> None:
-    required_columns = FEATURE_COLUMNS.copy()
-
-    if require_target:
-        required_columns.append(TARGET_COLUMN)
-
-    missing = [col for col in required_columns if col not in df.columns]
-
-    assert not missing, f"{table_name} missing columns: {missing}"
-
-
 def prepare_xy(
     df: pd.DataFrame,
     table_name: str,
-    require_target: bool = True,
+    require_target: bool,
 ) -> tuple[pd.DataFrame, pd.Series | None]:
-    validate_features(df, table_name, require_target=require_target)
+    missing = [col for col in FEATURE_COLUMNS if col not in df.columns]
+    assert not missing, f"{table_name} missing features: {missing}"
 
     data = df.copy()
 
     for col in FEATURE_COLUMNS:
         data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
 
-    x = data[FEATURE_COLUMNS]
+    x = data[FEATURE_COLUMNS].copy()
 
     y = None
     if require_target:
-        y = pd.to_numeric(data[TARGET_COLUMN], errors="coerce").fillna(0)
-        y = y.clip(lower=0, upper=20)
+        assert TARGET_COL in data.columns, f"{table_name} missing target: {TARGET_COL}"
+        y = pd.to_numeric(data[TARGET_COL], errors="coerce").fillna(0)
+        y = y.clip(CLIP_MIN, CLIP_MAX)
 
     return x, y
 
 
-def maybe_sample_train(
-    train: pd.DataFrame,
-    max_train_rows: int,
-    seed: int,
-) -> pd.DataFrame:
-    if len(train) <= max_train_rows:
-        LOGGER.info("Using full training set with %s rows", len(train))
-        return train
-
-    LOGGER.info(
-        "Sampling training set from %s to %s rows",
-        len(train),
-        max_train_rows,
-    )
-
-    return train.sample(
-        n=max_train_rows,
-        random_state=seed,
-    ).reset_index(drop=True)
-
-
-def train_model(
+def train_ridge(
     x_train: pd.DataFrame,
     y_train: pd.Series,
-    seed: int,
-) -> HistGradientBoostingRegressor:
-    LOGGER.info("Training HistGradientBoostingRegressor")
+    alpha: float,
+) -> Ridge:
+    model = Ridge(alpha=alpha)
+    model.fit(x_train, y_train)
+    return model
 
-    model = HistGradientBoostingRegressor(
-        loss="squared_error",
-        learning_rate=0.08,
-        max_iter=180,
-        max_leaf_nodes=31,
-        min_samples_leaf=25,
-        l2_regularization=0.1,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=10,
+
+def train_gbr(
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    n_estimators: int,
+    learning_rate: float,
+    max_depth: int,
+    seed: int,
+) -> GradientBoostingRegressor:
+    model = GradientBoostingRegressor(
+        n_estimators=n_estimators,
+        learning_rate=learning_rate,
+        max_depth=max_depth,
         random_state=seed,
     )
 
     model.fit(x_train, y_train)
 
-    LOGGER.info("Model training completed")
-
     return model
 
 
-def predict_clipped(
-    model: HistGradientBoostingRegressor,
-    x: pd.DataFrame,
-) -> np.ndarray:
+def predict_clipped(model: Any, x: pd.DataFrame) -> np.ndarray:
     preds = model.predict(x)
-    preds = np.clip(preds, 0, 20)
+    preds = np.clip(preds, CLIP_MIN, CLIP_MAX)
     return preds
+
+
+def compute_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float | None]:
+    y_pred = np.clip(y_pred, CLIP_MIN, CLIP_MAX)
+
+    rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
+    mae = float(mean_absolute_error(y_true, y_pred))
+    r2 = float(r2_score(y_true, y_pred))
+
+    mask = y_true != 0
+    if mask.any():
+        mape = float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])))
+    else:
+        mape = None
+
+    return {
+        "rmse": rmse,
+        "mae": mae,
+        "r2": r2,
+        "mape": mape,
+        "prediction_total": float(np.sum(y_pred)),
+        "actual_total": float(np.sum(y_true)),
+    }
 
 
 def build_model_evaluation(
@@ -221,19 +179,21 @@ def build_model_evaluation(
     evaluation = validation.copy()
 
     evaluation["actual_item_cnt_month"] = pd.to_numeric(
-        evaluation["item_cnt_month"],
+        evaluation[TARGET_COL],
         errors="coerce",
-    ).fillna(0).clip(lower=0, upper=20)
+    ).fillna(0).clip(CLIP_MIN, CLIP_MAX)
 
     evaluation["model_prediction"] = model_predictions
+
     evaluation["baseline_prediction"] = pd.to_numeric(
-        evaluation["lag_1"],
+        evaluation["item_cnt_month_lag_1"],
         errors="coerce",
-    ).fillna(0).clip(lower=0, upper=20)
+    ).fillna(0).clip(CLIP_MIN, CLIP_MAX)
 
     evaluation["model_error"] = (
         evaluation["model_prediction"] - evaluation["actual_item_cnt_month"]
     )
+
     evaluation["baseline_error"] = (
         evaluation["baseline_prediction"] - evaluation["actual_item_cnt_month"]
     )
@@ -249,10 +209,12 @@ def build_model_evaluation(
         "year",
         "month",
         "shop_id",
+        "shop_name",
         "item_id",
+        "item_name",
+        "item_category_id",
         "category_id",
         "category_name",
-        "item_name",
         "actual_item_cnt_month",
         "model_prediction",
         "baseline_prediction",
@@ -262,27 +224,16 @@ def build_model_evaluation(
         "baseline_absolute_error",
         "model_squared_error",
         "baseline_squared_error",
+        "item_cnt_month_lag_1",
+        "item_cnt_month_lag_2",
+        "item_cnt_month_lag_3",
+        "item_cnt_month_lag_6",
+        "item_cnt_month_lag_12",
     ]
 
     available_columns = [col for col in keep_columns if col in evaluation.columns]
 
-    evaluation = evaluation[available_columns].copy()
-
-    LOGGER.info("model_evaluation has %s rows", len(evaluation))
-
-    return evaluation
-
-
-def compute_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict:
-    rmse = mean_squared_error(y_true, y_pred) ** 0.5
-
-    return {
-        "mae": float(mean_absolute_error(y_true, y_pred)),
-        "rmse": float(rmse),
-        "r2": float(r2_score(y_true, y_pred)),
-        "prediction_total": float(np.sum(y_pred)),
-        "actual_total": float(np.sum(y_true)),
-    }
+    return evaluation[available_columns].copy()
 
 
 def build_model_metrics_global(evaluation: pd.DataFrame) -> pd.DataFrame:
@@ -301,14 +252,19 @@ def build_model_metrics_global(evaluation: pd.DataFrame) -> pd.DataFrame:
         "model_mae": model_metrics["mae"],
         "model_rmse": model_metrics["rmse"],
         "model_r2": model_metrics["r2"],
+        "model_mape": model_metrics["mape"],
         "model_prediction_total": model_metrics["prediction_total"],
         "baseline_mae": baseline_metrics["mae"],
         "baseline_rmse": baseline_metrics["rmse"],
         "baseline_r2": baseline_metrics["r2"],
+        "baseline_mape": baseline_metrics["mape"],
         "baseline_prediction_total": baseline_metrics["prediction_total"],
         "actual_total": model_metrics["actual_total"],
         "mae_improvement": baseline_metrics["mae"] - model_metrics["mae"],
         "rmse_improvement": baseline_metrics["rmse"] - model_metrics["rmse"],
+        "model_name": "GradientBoostingRegressor",
+        "feature_set": "task_01_original_features",
+        "features": ",".join(FEATURE_COLUMNS),
         "generated_at_utc": pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -319,7 +275,13 @@ def build_model_metrics_by_category(evaluation: pd.DataFrame) -> pd.DataFrame:
     LOGGER.info("Building model_metrics_by_category")
 
     metrics = (
-        evaluation.groupby(["category_id", "category_name"], as_index=False)
+        evaluation.groupby(
+            [
+                "category_id",
+                "category_name",
+            ],
+            as_index=False,
+        )
         .agg(
             n_rows=("item_id", "size"),
             actual_total=("actual_item_cnt_month", "sum"),
@@ -341,8 +303,6 @@ def build_model_metrics_by_category(evaluation: pd.DataFrame) -> pd.DataFrame:
 
     metrics = metrics.drop(columns=["model_mse", "baseline_mse"])
 
-    LOGGER.info("model_metrics_by_category has %s rows", len(metrics))
-
     return metrics
 
 
@@ -355,24 +315,60 @@ def build_model_forecast_next_month(
     forecast = inference.copy()
 
     forecast["model_prediction"] = model_predictions
+
     forecast["baseline_prediction"] = pd.to_numeric(
-        forecast["lag_1"],
+        forecast["item_cnt_month_lag_1"],
         errors="coerce",
-    ).fillna(0).clip(lower=0, upper=20)
+    ).fillna(0).clip(CLIP_MIN, CLIP_MAX)
 
     forecast["prediction_month"] = forecast["date_block_num"]
+    forecast["lag_1"] = forecast["item_cnt_month_lag_1"]
+
+    forecast["lag_mean_3"] = forecast[
+        [
+            "item_cnt_month_lag_1",
+            "item_cnt_month_lag_2",
+            "item_cnt_month_lag_3",
+        ]
+    ].mean(axis=1)
+
+    forecast["lag_mean_6"] = forecast[
+        [
+            "item_cnt_month_lag_1",
+            "item_cnt_month_lag_2",
+            "item_cnt_month_lag_3",
+            "item_cnt_month_lag_6",
+        ]
+    ].mean(axis=1)
+
+    forecast["had_sales_lag_1"] = (forecast["item_cnt_month_lag_1"] > 0).astype("int8")
+
+    forecast["had_sales_lag_3"] = (
+        forecast[
+            [
+                "item_cnt_month_lag_1",
+                "item_cnt_month_lag_2",
+                "item_cnt_month_lag_3",
+            ]
+        ].sum(axis=1)
+        > 0
+    ).astype("int8")
+
     forecast["generated_at_utc"] = pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     keep_columns = [
+        "id",
         "prediction_month",
         "date_block_num",
         "year",
         "month",
         "shop_id",
+        "shop_name",
         "item_id",
+        "item_name",
+        "item_category_id",
         "category_id",
         "category_name",
-        "item_name",
         "model_prediction",
         "baseline_prediction",
         "lag_1",
@@ -380,16 +376,17 @@ def build_model_forecast_next_month(
         "lag_mean_6",
         "had_sales_lag_1",
         "had_sales_lag_3",
+        "item_cnt_month_lag_1",
+        "item_cnt_month_lag_2",
+        "item_cnt_month_lag_3",
+        "item_cnt_month_lag_6",
+        "item_cnt_month_lag_12",
         "generated_at_utc",
     ]
 
     available_columns = [col for col in keep_columns if col in forecast.columns]
 
-    forecast = forecast[available_columns].copy()
-
-    LOGGER.info("model_forecast_next_month has %s rows", len(forecast))
-
-    return forecast
+    return forecast[available_columns].copy()
 
 
 def write_gold_table(
@@ -428,11 +425,13 @@ def write_gold_table(
 
 
 def save_artifacts(
-    model: HistGradientBoostingRegressor,
+    model: GradientBoostingRegressor,
     metrics: pd.DataFrame,
+    ridge_rmse_valid: float,
     bucket: str,
     artifacts_prefix: str,
     local_model_dir: str,
+    model_params: dict[str, Any],
 ) -> None:
     LOGGER.info("Saving model artifacts")
 
@@ -445,9 +444,13 @@ def save_artifacts(
     joblib.dump(model, model_path)
 
     metrics_dict = metrics.iloc[0].to_dict()
+    metrics_dict["baseline_ridge_rmse_valid"] = ridge_rmse_valid
+    metrics_dict["model_params"] = model_params
+    metrics_dict["target_clip"] = [CLIP_MIN, CLIP_MAX]
+    metrics_dict["features_list"] = FEATURE_COLUMNS
 
     with open(metrics_path, "w", encoding="utf-8") as f:
-        json.dump(metrics_dict, f, indent=2)
+        json.dump(metrics_dict, f, indent=2, default=str)
 
     model_s3_uri = f"s3://{bucket}/{artifacts_prefix}/model.joblib"
     metrics_s3_uri = f"s3://{bucket}/{artifacts_prefix}/model_metrics.json"
@@ -473,7 +476,10 @@ def run(
     gold_prefix: str,
     artifacts_prefix: str,
     local_model_dir: str,
-    max_train_rows: int,
+    alpha: float,
+    n_estimators: int,
+    learning_rate: float,
+    max_depth: int,
     seed: int,
 ) -> None:
     wr.catalog.create_database(
@@ -485,14 +491,8 @@ def run(
     validation = read_table(ml_database, "validation_features")
     inference = read_table(ml_database, "inference_features")
 
-    train_sample = maybe_sample_train(
-        train=train,
-        max_train_rows=max_train_rows,
-        seed=seed,
-    )
-
     x_train, y_train = prepare_xy(
-        train_sample,
+        train,
         table_name="train_features",
         require_target=True,
     )
@@ -509,20 +509,41 @@ def run(
         require_target=False,
     )
 
-    model = train_model(
+    LOGGER.info("Training Ridge baseline")
+    ridge = train_ridge(
         x_train=x_train,
         y_train=y_train,
+        alpha=alpha,
+    )
+
+    ridge_pred = predict_clipped(
+        model=ridge,
+        x=x_validation,
+    )
+
+    ridge_rmse_valid = float(np.sqrt(mean_squared_error(y_validation, ridge_pred)))
+    LOGGER.info("Ridge RMSE valid: %.4f", ridge_rmse_valid)
+
+    model_params = {
+        "n_estimators": n_estimators,
+        "learning_rate": learning_rate,
+        "max_depth": max_depth,
+        "random_state": seed,
+    }
+
+    LOGGER.info("Training GradientBoostingRegressor with original params")
+    gbr = train_gbr(
+        x_train=x_train,
+        y_train=y_train,
+        n_estimators=n_estimators,
+        learning_rate=learning_rate,
+        max_depth=max_depth,
         seed=seed,
     )
 
     validation_predictions = predict_clipped(
-        model=model,
+        model=gbr,
         x=x_validation,
-    )
-
-    inference_predictions = predict_clipped(
-        model=model,
-        x=x_inference,
     )
 
     model_evaluation = build_model_evaluation(
@@ -536,6 +557,17 @@ def run(
 
     model_metrics_by_category = build_model_metrics_by_category(
         evaluation=model_evaluation,
+    )
+
+    LOGGER.info("Re-training GradientBoostingRegressor with train + validation")
+    x_all = pd.concat([x_train, x_validation], ignore_index=True)
+    y_all = pd.concat([y_train, y_validation], ignore_index=True)
+
+    gbr.fit(x_all, y_all)
+
+    inference_predictions = predict_clipped(
+        model=gbr,
+        x=x_inference,
     )
 
     model_forecast_next_month = build_model_forecast_next_month(
@@ -578,14 +610,16 @@ def run(
     )
 
     save_artifacts(
-        model=model,
+        model=gbr,
         metrics=model_metrics_global,
+        ridge_rmse_valid=ridge_rmse_valid,
         bucket=bucket,
         artifacts_prefix=artifacts_prefix,
         local_model_dir=local_model_dir,
+        model_params=model_params,
     )
 
-    LOGGER.info("Model training and batch prediction completed successfully.")
+    LOGGER.info("Model training completed successfully.")
     LOGGER.info("\n%s", model_metrics_global.to_string(index=False))
 
 
@@ -601,7 +635,10 @@ def main() -> None:
             gold_prefix=args.gold_prefix,
             artifacts_prefix=args.artifacts_prefix,
             local_model_dir=args.local_model_dir,
-            max_train_rows=args.max_train_rows,
+            alpha=args.alpha,
+            n_estimators=args.n_estimators,
+            learning_rate=args.learning_rate,
+            max_depth=args.max_depth,
             seed=args.seed,
         )
     except Exception:
