@@ -321,13 +321,6 @@ La validación usa el último mes histórico disponible.
 | R² | 0.267 |
 | Demanda real | 61,583 |
 | Demanda predicha | 62,792 |
-
-Interpretación:
-
-- El modelo predice demanda mensual esperada a nivel tienda-producto.
-- Muchas combinaciones tienda-producto tienen demanda muy baja, por eso es normal ver predicciones menores a 1.
-- Para planeación, las vistas agregadas por categoría, tienda y producto son más útiles que revisar filas individuales.
-
 ---
 
 ## Aplicación Streamlit
