@@ -1,289 +1,104 @@
 # Forecasting Data Product — 1C Company
 
-MVP end-to-end para planeación de demanda mensual en retail usando arquitectura Medallion en AWS, Machine Learning batch, una aplicación Streamlit pública y una base operacional en PostgreSQL/RDS para capturar feedback de negocio.
+MVP end-to-end para planeación de demanda mensual en retail. El proyecto implementa una arquitectura Medallion en AWS, un pipeline de Machine Learning batch, una app pública en Streamlit y una base operacional en RDS PostgreSQL para capturar feedback de negocio.
 
 ---
 
-## 1. URL pública de la aplicación
-
-**Aplicación Streamlit pública:**
+## App pública
 
 ```text
 http://forecasting-data-product-alb-1021855290.us-east-1.elb.amazonaws.com/
 ```
 
-La aplicación permite:
+La app permite:
 
-- Consultar un resumen ejecutivo del modelo y de la demanda esperada.
-- Explorar pronósticos agregados por categoría, tienda y producto.
-- Revisar evaluación del modelo sobre el último mes histórico.
+- Consultar un resumen ejecutivo del modelo.
+- Explorar pronósticos por categoría, tienda y producto.
+- Revisar la evaluación del modelo.
 - Descargar predicciones filtradas en CSV.
 - Capturar feedback de negocio.
-- Marcar productos con problemas para revisión operativa.
+- Marcar productos con problemas para revisión.
 
 ---
 
-## 2. Problema de negocio
+## Problema de negocio
 
-El caso está basado en datos históricos de ventas de 1C Company. El objetivo es construir un producto de datos que ayude a planear inventario y demanda mensual a nivel tienda-producto.
+El objetivo es apoyar la planeación de demanda mensual a nivel tienda-producto usando datos históricos de ventas.
 
-En retail, una mala planeación de demanda puede generar dos problemas opuestos:
+El producto ayuda a reducir dos riesgos principales:
 
-1. **Sobrestock:** exceso de inventario, costos de almacenamiento y descuentos forzados.
-2. **Stockouts:** falta de productos, pérdida de ventas y mala experiencia para clientes.
-
-Este proyecto busca convertir datos históricos de ventas en un sistema operativo para consultar predicciones, evaluar el modelo y capturar feedback del negocio.
+- **Sobrestock:** exceso de inventario y costos de almacenamiento.
+- **Quiebres de stock:** falta de productos y pérdida de ventas.
 
 ---
 
-## 3. Objetivo del proyecto
+## Arquitectura
 
-Construir un flujo completo de datos y ML en AWS:
-
-```text
-Kaggle dataset
-→ Bronze ETL
-→ Silver ETL
-→ Gold ETL
-→ ML feature engineering
-→ Model training + batch prediction
-→ Streamlit dashboard
-→ RDS feedback
-→ Docker/ECR/ECS public deployment
-```
-
-El producto final es una aplicación Streamlit desplegada públicamente en ECS Fargate.
-
----
-
-## 4. Arquitectura general
-
-La arquitectura sigue un patrón Medallion:
+La solución sigue un patrón Medallion:
 
 ```text
 Bronze → Silver → Gold
 ```
 
-Además, se agrega una rama de Machine Learning desde Silver:
+Además, se agrega una rama de Machine Learning:
 
 ```text
-Silver → ML Features → Model Training → Gold Model Outputs → Streamlit
+Silver → Features ML → Entrenamiento → Outputs del modelo en Gold → Streamlit
 ```
 
 ### Diagrama de arquitectura
 
-> Insertar imagen aquí.
-
-```markdown
-![Architecture Diagram](docs/architecture.png)
-```
-
-### Flujo general
-
-```text
-Kaggle Dataset
-        ↓
-etl/bronze.py
-        ↓
-S3 Raw / S3 Bronze
-        ↓
-Glue DB: forecasting_bronze
-        ↓
-etl/silver.py
-        ↓
-S3 Silver
-        ↓
-Glue DB: forecasting_silver
-        ├──→ etl/gold.py
-        │       ↓
-        │   Glue DB: forecasting_gold
-        │
-        └──→ ml/build_features.py
-                ↓
-            Glue DB: forecasting_ml
-                ↓
-            ml/train_model.py
-                ↓
-            model.joblib + model_metrics.json
-                ↓
-            Glue DB: forecasting_gold
-                ↓
-            Streamlit App
-                ↓
-            ECS Fargate + ALB + Public URL
-```
+<img width="1450" height="787" alt="architecture" src="https://github.com/user-attachments/assets/97d5afbc-b8f9-42f0-b365-4336e43cb70e" />
 
 ---
 
-## 5. Servicios de AWS utilizados
+## Servicios de AWS utilizados
 
 | Servicio | Uso |
 |---|---|
-| Amazon S3 | Data lake para raw, bronze, silver, gold, ML features y artefactos |
-| AWS Glue Data Catalog | Catálogo de tablas para Bronze, Silver, Gold y ML |
-| Amazon Athena | Consulta SQL sobre tablas registradas en Glue |
-| Amazon RDS PostgreSQL | Base operacional para feedback y productos marcados |
-| AWS Secrets Manager | Administración de credenciales de RDS |
-| Amazon ECR | Repositorio de imagen Docker de Streamlit |
-| Amazon ECS Fargate | Ejecución serverless del contenedor de Streamlit |
-| Application Load Balancer | Exposición pública de la app |
-| AWS CloudFormation | Infraestructura como código |
-| CloudWatch Logs | Logs del servicio ECS |
+| S3 | Data lake para raw, bronze, silver, gold, features ML y artefactos |
+| Glue Data Catalog | Catálogo de tablas |
+| Athena | Consultas SQL sobre datos en S3 |
+| RDS PostgreSQL | Feedback operacional |
+| Secrets Manager | Credenciales de RDS |
+| ECR | Imagen Docker de Streamlit |
+| ECS Fargate | Ejecución pública de la app |
+| Application Load Balancer | URL pública |
+| CloudFormation | Infraestructura como código |
 
 ---
 
-## 6. Estructura del repositorio
+## Estructura del repositorio
 
 ```text
 .
-├── Dockerfile
-├── README.md
-├── app
+├── app/
 │   └── streamlit_app.py
-├── artifacts
-│   └── models
-│       ├── model.joblib
-│       └── model_metrics.json
-├── data
-│   └── raw
-│       ├── item_categories.csv
-│       ├── items.csv
-│       ├── sales_train.csv
-│       ├── sample_submission.csv
-│       ├── shops.csv
-│       └── test.csv
-├── docs
-│   └── repo-tree.txt
-├── etl
+├── etl/
 │   ├── bronze.py
-│   ├── gold.py
-│   └── silver.py
-├── infra
-│   ├── ecs-streamlit.yaml
-│   ├── forecasting-data-product-foundation.yaml
-│   └── rds-forecasting.yaml
-├── main.py
-├── ml
+│   ├── silver.py
+│   └── gold.py
+├── ml/
 │   ├── build_features.py
 │   └── train_model.py
-├── postgres
+├── postgres/
 │   └── create_tables.py
+├── infra/
+│   ├── forecasting-data-product-foundation.yaml
+│   ├── rds-forecasting.yaml
+│   └── ecs-streamlit.yaml
+├── docs/
+├── Dockerfile
 ├── pyproject.toml
-└── uv.lock
+├── uv.lock
+└── README.md
 ```
 
 ---
 
-## 7. Dataset
+## Pipeline de datos
 
-Fuente de datos:
-
-```text
-Kaggle — Predict Future Sales / English converted dataset
-```
-
-Archivos principales:
-
-| Archivo | Descripción |
-|---|---|
-| `sales_train.csv` | Ventas históricas diarias |
-| `items.csv` | Catálogo de productos |
-| `item_categories.csv` | Catálogo de categorías |
-| `shops.csv` | Catálogo de tiendas |
-| `test.csv` | Combinaciones tienda-producto para predicción |
-| `sample_submission.csv` | Formato de submission |
-
-Los datos crudos no se versionan en Git. Se descargan mediante `etl/bronze.py` y se guardan en S3.
-
----
-
-## 8. Infraestructura con CloudFormation
-
-### 8.1 Foundation stack
-
-Template:
-
-```text
-infra/forecasting-data-product-foundation.yaml
-```
-
-Crea o configura:
-
-- Bucket S3: `forecasting-data-product`
-- Glue databases:
-  - `forecasting_bronze`
-  - `forecasting_silver`
-  - `forecasting_gold`
-
-Stack sugerido:
-
-```text
-forecasting-data-product-foundation
-```
-
----
-
-### 8.2 RDS stack
-
-Template:
-
-```text
-infra/rds-forecasting.yaml
-```
-
-Crea:
-
-- RDS PostgreSQL
-- Secrets Manager secret
-- Security Group
-- Subnet Group
-
-Secret utilizado:
-
-```text
-itam/rds/forecasting/credentials
-```
-
-Stack sugerido:
-
-```text
-forecasting-data-product-rds
-```
-
----
-
-### 8.3 ECS / Streamlit stack
-
-Template:
-
-```text
-infra/ecs-streamlit.yaml
-```
-
-Crea:
-
-- ECS Cluster
-- ECS Service
-- ECS Task Definition
-- Application Load Balancer
-- Target Group
-- Security Groups
-- IAM Roles
-- CloudWatch Log Group
-
-Stack sugerido:
-
-```text
-forecasting-data-product-ecs
-```
-
----
-
-## 9. Pipeline Medallion
-
----
-
-### 9.1 Bronze ETL
+### Bronze
 
 Script:
 
@@ -291,29 +106,21 @@ Script:
 etl/bronze.py
 ```
 
-Responsabilidades:
+Hace lo siguiente:
 
-- Descarga dataset desde Kaggle.
-- Guarda CSVs localmente en `data/raw`.
-- Sube CSVs crudos a S3 raw.
-- Convierte CSVs a Parquet.
-- Escribe tablas Bronze en S3.
-- Registra metadata en Glue.
+- Descarga el dataset desde Kaggle.
+- Guarda CSVs en `data/raw`.
+- Sube CSVs a S3 raw.
+- Convierte los datos a Parquet.
+- Registra tablas en Glue.
 
-Ubicaciones S3:
-
-```text
-s3://forecasting-data-product/forecasting/raw/
-s3://forecasting-data-product/forecasting/bronze/
-```
-
-Glue database:
+Base de Glue:
 
 ```text
 forecasting_bronze
 ```
 
-Tablas creadas:
+Tablas principales:
 
 ```text
 sales_train
@@ -327,22 +134,12 @@ sample_submission
 Ejecución:
 
 ```bash
-uv run python etl/bronze.py \
-  --bucket forecasting-data-product
-```
-
-Si los CSVs ya existen localmente y no se quiere descargar otra vez:
-
-```bash
-uv run python etl/bronze.py \
-  --bucket forecasting-data-product \
-  --data-dir data/raw \
-  --skip-download
+uv run python etl/bronze.py --bucket forecasting-data-product
 ```
 
 ---
 
-### 9.2 Silver ETL
+### Silver
 
 Script:
 
@@ -350,27 +147,20 @@ Script:
 etl/silver.py
 ```
 
-Responsabilidades:
+Hace lo siguiente:
 
-- Lee tablas Bronze desde Glue/S3.
-- Limpia datos.
-- Agrega ventas diarias a ventas mensuales.
-- Enriquece ventas con catálogo de productos y tiendas.
-- Construye input de inferencia.
+- Limpia datos Bronze.
+- Agrega ventas mensuales.
+- Enriquece con catálogos.
+- Construye el input de inferencia.
 
-Ubicación S3:
-
-```text
-s3://forecasting-data-product/forecasting/silver/
-```
-
-Glue database:
+Base de Glue:
 
 ```text
 forecasting_silver
 ```
 
-Tablas creadas:
+Tablas principales:
 
 ```text
 item_catalog
@@ -383,13 +173,12 @@ forecast_input
 Ejecución:
 
 ```bash
-uv run python etl/silver.py \
-  --bucket forecasting-data-product
+uv run python etl/silver.py --bucket forecasting-data-product
 ```
 
 ---
 
-### 9.3 Gold ETL
+### Gold
 
 Script:
 
@@ -397,26 +186,19 @@ Script:
 etl/gold.py
 ```
 
-Responsabilidades:
+Hace lo siguiente:
 
-- Construye tablas listas para consumo analítico.
+- Construye tablas analíticas.
 - Genera KPIs por categoría, tienda y producto.
-- Genera baseline naive.
-- Evalúa baseline.
+- Calcula un baseline naive.
 
-Ubicación S3:
-
-```text
-s3://forecasting-data-product/forecasting/gold/
-```
-
-Glue database:
+Base de Glue:
 
 ```text
 forecasting_gold
 ```
 
-Tablas creadas por Gold ETL:
+Tablas principales:
 
 ```text
 demand_history
@@ -432,21 +214,16 @@ baseline_metrics_by_category
 Ejecución:
 
 ```bash
-uv run python etl/gold.py \
-  --bucket forecasting-data-product
+uv run python etl/gold.py --bucket forecasting-data-product
 ```
 
 ---
 
-## 10. Machine Learning pipeline
+## Pipeline de Machine Learning
 
-El modelo no se ejecuta dentro de Streamlit. La inferencia se ejecuta en batch y los resultados se escriben en Gold.
+El modelo se ejecuta en batch. Streamlit no recalcula predicciones en vivo; solo lee resultados ya guardados en Gold.
 
-Esto reduce latencia, evita recalcular predicciones en la app y permite que Streamlit solo consuma tablas ya preparadas.
-
----
-
-### 10.1 Feature engineering
+### Ingeniería de features
 
 Script:
 
@@ -454,21 +231,20 @@ Script:
 ml/build_features.py
 ```
 
-Responsabilidades:
+Hace lo siguiente:
 
-- Lee datos limpios desde `forecasting_silver`.
 - Construye una matriz tienda-producto-mes.
-- Incluye meses sin venta como ceros.
-- Genera variables temporales y lags.
-- Divide datos en train, validation e inference.
+- Rellena meses sin venta con 0.
+- Crea variables temporales y lags.
+- Genera train, validation e inference.
 
-Glue database:
+Base de Glue:
 
 ```text
 forecasting_ml
 ```
 
-Tablas creadas:
+Tablas:
 
 ```text
 train_features
@@ -479,13 +255,12 @@ inference_features
 Ejecución:
 
 ```bash
-uv run python ml/build_features.py \
-  --bucket forecasting-data-product
+uv run python ml/build_features.py --bucket forecasting-data-product
 ```
 
 ---
 
-### 10.2 Entrenamiento y predicción batch
+### Entrenamiento y predicción batch
 
 Script:
 
@@ -493,7 +268,7 @@ Script:
 ml/train_model.py
 ```
 
-Modelo final:
+Modelo:
 
 ```text
 GradientBoostingRegressor
@@ -515,35 +290,11 @@ item_cnt_month_lag_6
 item_cnt_month_lag_12
 ```
 
-Target:
+Outputs:
 
 ```text
-item_cnt_month
-```
-
-El target se recorta al rango:
-
-```text
-[0, 20]
-```
-
-Artefactos generados:
-
-```text
-artifacts/models/model.joblib
-artifacts/models/model_metrics.json
-```
-
-Artefactos en S3:
-
-```text
-s3://forecasting-data-product/forecasting/artifacts/models/model.joblib
-s3://forecasting-data-product/forecasting/artifacts/models/model_metrics.json
-```
-
-Tablas Gold creadas por el modelo:
-
-```text
+model.joblib
+model_metrics.json
 model_forecast_next_month
 model_evaluation
 model_metrics_global
@@ -553,35 +304,33 @@ model_metrics_by_category
 Ejecución:
 
 ```bash
-uv run python ml/train_model.py \
-  --bucket forecasting-data-product
+uv run python ml/train_model.py --bucket forecasting-data-product
 ```
 
 ---
 
-## 11. Métricas del modelo
+## Métricas del modelo
 
-Métricas sobre el último mes histórico usado como validación:
+La validación usa el último mes histórico disponible.
 
 | Métrica | Valor |
 |---|---:|
 | Filas de evaluación | 238,172 |
-| MAE modelo | 0.346 |
-| RMSE modelo | 0.973 |
-| R² modelo | 0.267 |
+| MAE | 0.346 |
+| RMSE | 0.973 |
+| R² | 0.267 |
 | Demanda real | 61,583 |
 | Demanda predicha | 62,792 |
 
 Interpretación:
 
-- El modelo predice demanda mensual a nivel tienda-producto.
-- En este problema hay muchas combinaciones con demanda cero o muy baja.
-- Por ello, es normal encontrar predicciones menores a 1 unidad para combinaciones tienda-producto de baja rotación.
-- Para decisiones de negocio, las vistas agregadas por categoría, tienda o producto son más útiles que revisar únicamente filas granulares.
+- El modelo predice demanda mensual esperada a nivel tienda-producto.
+- Muchas combinaciones tienda-producto tienen demanda muy baja, por eso es normal ver predicciones menores a 1.
+- Para planeación, las vistas agregadas por categoría, tienda y producto son más útiles que revisar filas individuales.
 
 ---
 
-## 12. Aplicación Streamlit
+## Aplicación Streamlit
 
 Archivo principal:
 
@@ -595,143 +344,51 @@ La app lee resultados desde:
 forecasting_gold
 ```
 
-Tablas principales consumidas:
+Páginas principales:
 
-```text
-category_monthly
-product_kpis
-model_forecast_next_month
-model_evaluation
-model_metrics_global
-model_metrics_by_category
-```
-
-### Páginas de la app
-
-#### 1. Resumen ejecutivo
-
-Incluye:
-
-- Descripción del producto.
-- Hallazgos principales.
-- Métricas del modelo.
-- Demanda real vs demanda predicha.
-- Demanda esperada por categoría.
-- Productos históricamente relevantes.
-
-#### 2. Pronóstico
-
-Incluye:
-
-- Demanda esperada total.
-- Promedio por tienda-producto.
-- Combinaciones con demanda esperada mayor a 1.
-- Vista agregada por categoría.
-- Vista agregada por tienda.
-- Top productos.
-- Detalle granular tienda-producto.
-
-#### 3. Evaluación
-
-Incluye:
-
-- Métricas del modelo final.
-- Demanda real vs predicha por categoría.
-- Categorías con mayor error agregado.
-- Casos individuales con mayor error.
-- Comparación técnica contra baseline en un expander.
-
-#### 4. Feedback
-
-Permite capturar feedback de negocio y guardarlo en RDS.
-
-#### 5. Productos marcados
-
-Permite marcar productos problemáticos y guardarlos en RDS.
+- **Resumen ejecutivo:** métricas, hallazgos y demanda esperada.
+- **Pronóstico:** demanda por categoría, tienda y producto.
+- **Evaluación:** métricas del modelo y análisis de error.
+- **Feedback:** captura feedback de negocio en RDS.
+- **Productos marcados:** guarda productos problemáticos en RDS.
 
 ---
 
-## 13. RDS operacional
+## Base operacional en RDS
 
-RDS PostgreSQL se usa como base operacional de la app. No almacena las tablas analíticas del modelo; esas viven en S3/Glue.
+RDS PostgreSQL guarda información generada desde la app.
 
-RDS guarda información generada por usuarios:
+Tablas:
 
 ```text
+forecast_jobs
 business_feedback
 flagged_products
-forecast_jobs
 app_metrics
 ```
 
+RDS no almacena las tablas analíticas. Los pronósticos y outputs del modelo viven en S3/Glue.
+
 ### Diagrama ERD
 
-> Insertar imagen aquí.
-
-```markdown
-![RDS ERD](docs/erd-rds.png)
-```
-
-### Tablas
-
-#### `business_feedback`
-
-| Columna | Descripción |
-|---|---|
-| `feedback_id` | PK |
-| `created_at` | Timestamp |
-| `created_by` | Usuario |
-| `shop_id` | Referencia lógica a tienda |
-| `item_id` | Referencia lógica a producto |
-| `category_id` | Referencia lógica a categoría |
-| `forecast_month` | Mes del forecast |
-| `severity` | Severidad |
-| `status` | Estado |
-| `feedback_text` | Comentario de negocio |
-
-#### `flagged_products`
-
-| Columna | Descripción |
-|---|---|
-| `flag_id` | PK |
-| `created_at` | Timestamp |
-| `created_by` | Usuario |
-| `shop_id` | Referencia lógica a tienda |
-| `item_id` | Referencia lógica a producto |
-| `category_id` | Referencia lógica a categoría |
-| `reason` | Razón del flag |
-| `priority` | Prioridad |
-| `status` | Estado |
-| `notes` | Notas |
-
-#### `forecast_jobs`
-
-Tabla para registrar ejecuciones o solicitudes operativas.
-
-#### `app_metrics`
-
-Tabla para registrar métricas operativas de la aplicación.
-
-Nota: `shop_id`, `item_id` y `category_id` funcionan como claves de negocio y referencias lógicas hacia entidades analíticas en S3/Glue. No son foreign keys físicas dentro de RDS en este MVP.
+<img width="1030" height="879" alt="erd" src="https://github.com/user-attachments/assets/ed3ae58d-b9e7-4ab6-8485-d2a25ea1dd70" />
 
 ---
 
-## 14. Despliegue
+## Despliegue
 
 La app se empaqueta como imagen Docker, se sube a ECR y se ejecuta en ECS Fargate detrás de un Application Load Balancer.
 
-### Flujo de despliegue
-
 ```text
-Streamlit App + Dockerfile
-→ Docker image
+Streamlit App
+→ Docker Image
 → ECR
 → ECS Fargate
 → Application Load Balancer
-→ Public URL
+→ URL pública
 ```
 
-### Build local/SageMaker
+Construir y subir imagen:
 
 ```bash
 export AWS_REGION="us-east-1"
@@ -739,205 +396,32 @@ export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output tex
 export ECR_REPOSITORY="forecasting-data-product-streamlit"
 export IMAGE_TAG="streamlit-clean-$(date +%Y%m%d%H%M%S)"
 export IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
-```
 
-Login:
-
-```bash
 aws ecr get-login-password --region $AWS_REGION \
   | docker login \
       --username AWS \
       --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-```
 
-Build en SageMaker:
-
-```bash
 docker build --network sagemaker -t $ECR_REPOSITORY:$IMAGE_TAG .
-```
-
-Push:
-
-```bash
 docker tag $ECR_REPOSITORY:$IMAGE_TAG $IMAGE_URI
 docker push $IMAGE_URI
 ```
 
-Después se actualiza CloudFormation cambiando el parámetro:
+Después se actualiza el parámetro `ImageUri` en el stack de ECS de CloudFormation.
+
+---
+
+## Infraestructura
+
+Templates de CloudFormation:
 
 ```text
-ImageUri = nuevo IMAGE_URI
+infra/forecasting-data-product-foundation.yaml
+infra/rds-forecasting.yaml
+infra/ecs-streamlit.yaml
 ```
 
----
-
-## 15. Cómo correr localmente en SageMaker
-
-### Variables de entorno
-
-```bash
-export RDS_ENDPOINT="PEGAR_ENDPOINT_RDS"
-export RDS_SECRET_NAME="itam/rds/forecasting/credentials"
-export AWS_REGION="us-east-1"
-export GOLD_DATABASE="forecasting_gold"
-```
-
-### Ejecutar Streamlit
-
-```bash
-uv run streamlit run app/streamlit_app.py \
-  --server.port 8501 \
-  --server.address 0.0.0.0
-```
-
-En SageMaker, abrir vía proxy:
-
-```text
-https://<studio-domain>.studio.us-east-1.sagemaker.aws/jupyterlab/default/proxy/8501/
-```
-
----
-
-## 16. Validaciones útiles
-
-### Glue tables
-
-```bash
-aws glue get-tables \
-  --database-name forecasting_gold \
-  --query "TableList[].Name" \
-  --output table
-```
-
-### Modelo en S3
-
-```bash
-aws s3 ls s3://forecasting-data-product/forecasting/artifacts/models/
-```
-
-### ECS service
-
-```bash
-aws ecs describe-services \
-  --cluster forecasting-data-product-cluster \
-  --services forecasting-data-product-streamlit-service \
-  --region us-east-1 \
-  --query "services[0].{Status:status,Desired:desiredCount,Running:runningCount,Pending:pendingCount}" \
-  --output table
-```
-
-### RDS feedback
-
-```bash
-uv run python - <<'PY'
-import os
-import json
-import boto3
-import pandas as pd
-from urllib.parse import quote_plus
-from sqlalchemy import create_engine, text
-
-host = os.environ["RDS_ENDPOINT"]
-secret_name = os.getenv("RDS_SECRET_NAME", "itam/rds/forecasting/credentials")
-region = os.getenv("AWS_REGION", "us-east-1")
-
-client = boto3.client("secretsmanager", region_name=region)
-secret = client.get_secret_value(SecretId=secret_name)
-creds = json.loads(secret["SecretString"])
-
-user = quote_plus(creds["username"])
-password = quote_plus(creds["password"])
-dbname = creds["dbname"]
-port = creds.get("port", "5432")
-
-url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
-engine = create_engine(url, pool_pre_ping=True)
-
-with engine.connect() as conn:
-    feedback = pd.read_sql(
-        text("SELECT * FROM business_feedback ORDER BY created_at DESC LIMIT 5"),
-        conn,
-    )
-    flagged = pd.read_sql(
-        text("SELECT * FROM flagged_products ORDER BY created_at DESC LIMIT 5"),
-        conn,
-    )
-
-print("\nbusiness_feedback")
-print(feedback)
-
-print("\nflagged_products")
-print(flagged)
-PY
-```
-
----
-
-## 17. Evidencias / Screenshots
-
-> Agregar screenshots en `docs/screenshots/`.
-
-Sugeridos:
-
-### App
-
-- `docs/screenshots/app_resumen.png`
-- `docs/screenshots/app_pronostico_categoria.png`
-- `docs/screenshots/app_pronostico_producto.png`
-- `docs/screenshots/app_evaluacion.png`
-- `docs/screenshots/app_feedback.png`
-- `docs/screenshots/app_productos_marcados.png`
-
-### AWS
-
-- `docs/screenshots/cloudformation_foundation.png`
-- `docs/screenshots/cloudformation_rds.png`
-- `docs/screenshots/cloudformation_ecs.png`
-- `docs/screenshots/s3_bucket.png`
-- `docs/screenshots/glue_databases.png`
-- `docs/screenshots/ecr_image.png`
-- `docs/screenshots/ecs_service_running.png`
-- `docs/screenshots/target_group_healthy.png`
-- `docs/screenshots/rds_available.png`
-
----
-
-## 18. Limitaciones
-
-- El modelo predice demanda esperada mensual, no órdenes de inventario directamente.
-- Muchas combinaciones tienda-producto tienen demanda muy baja o cero, por lo que valores menores a 1 son normales.
-- RDS se usa solo para feedback operacional, no como warehouse analítico.
-- No se implementó una réplica de RDS porque la carga esperada del MVP es baja.
-- El modelo se ejecuta batch/offline; la app no recalcula predicciones en tiempo real.
-- No se implementó autenticación de usuarios para la app pública.
-- No se implementaron intervalos de confianza.
-
----
-
-## 19. Próximos pasos
-
-- Agregar autenticación a la app.
-- Automatizar el pipeline con SageMaker Pipelines o Step Functions.
-- Agregar monitoreo de drift de datos y performance del modelo.
-- Incluir intervalos de confianza en predicciones.
-- Agregar lógica de recomendación de inventario basada en reglas de negocio.
-- Incorporar promociones, precios y eventos externos.
-- Agregar CI/CD para build y despliegue automático.
-- Mejorar esquema operacional de RDS con usuarios, auditoría y relaciones normalizadas.
-
----
-
-## 20. Costos y apagado
-
-Para evitar costos innecesarios después de la revisión:
-
-- Detener o eliminar stack ECS.
-- Eliminar o pausar RDS si ya no se necesita.
-- Revisar imágenes en ECR.
-- Revisar objetos grandes en S3.
-- Mantener solo evidencia necesaria para entrega.
-
-Stacks principales:
+Stacks:
 
 ```text
 forecasting-data-product-foundation
@@ -947,33 +431,82 @@ forecasting-data-product-ecs
 
 ---
 
-## 21. Uso de herramientas de IA
+## Ejecutar Streamlit localmente en SageMaker
 
-Durante el desarrollo se utilizó asistencia de IA para acelerar:
+```bash
+export RDS_ENDPOINT="PEGAR_ENDPOINT_RDS"
+export RDS_SECRET_NAME="itam/rds/forecasting/credentials"
+export AWS_REGION="us-east-1"
+export GOLD_DATABASE="forecasting_gold"
 
-- Diseño de arquitectura.
-- Generación inicial de scripts ETL.
-- Debugging de errores de AWS, Docker y Glue.
-- Redacción de documentación.
-- Iteración del dashboard Streamlit.
-- Organización del reporte técnico.
+uv run streamlit run app/streamlit_app.py \
+  --server.port 8501 \
+  --server.address 0.0.0.0
+```
 
-Todas las decisiones finales de arquitectura, validación, ejecución y despliegue fueron verificadas mediante pruebas en AWS, outputs de terminal, Glue/Athena, RDS y la aplicación desplegada.
+Abrir con proxy de SageMaker:
+
+```text
+https://<studio-domain>.studio.us-east-1.sagemaker.aws/jupyterlab/default/proxy/8501/
+```
 
 ---
 
-## 22. Estado final del proyecto
+## Screenshots
 
-El proyecto quedó desplegado como un producto de datos funcional:
+### App
 
-```text
-✅ ETL Bronze / Silver / Gold
-✅ Feature engineering ML
-✅ Entrenamiento batch
-✅ Predicciones en Gold
-✅ Dashboard Streamlit
-✅ Feedback en RDS
-✅ Docker image en ECR
-✅ App corriendo en ECS Fargate
-✅ URL pública mediante ALB
-```
+#### Resumen ejecutivo
+
+<img width="1919" height="1040" alt="app_resumen" src="https://github.com/user-attachments/assets/bf41319f-09e6-4d62-89b5-09da33ef3658" />
+
+#### Pronóstico por categoría
+
+<img width="1919" height="1199" alt="app_pronostico_categoria" src="https://github.com/user-attachments/assets/d37a3652-d368-4edc-9602-c9cea1785029" />
+
+#### Evaluación
+
+<img width="1910" height="1097" alt="app_evaluacion" src="https://github.com/user-attachments/assets/01257e51-c44f-4c50-a2a5-f2708e79ebeb" />
+
+#### Feedback
+
+<img width="1919" height="1015" alt="app_feedback" src="https://github.com/user-attachments/assets/85824e50-9470-4c3c-b5ae-a7a66a9e4744" />
+
+#### Productos marcados
+
+<img width="1919" height="1055" alt="app_productos_marcados" src="https://github.com/user-attachments/assets/a655aa21-cd7e-40eb-9c10-ada6806a7461" />
+
+---
+
+### Evidencia AWS
+
+#### CloudFormation
+
+<img width="1677" height="32" alt="cloudformation_foundation" src="https://github.com/user-attachments/assets/6c94bc8d-1de5-4ac5-88b9-d8227baeef7a" />
+
+<img width="1670" height="31" alt="cloudformation_rds" src="https://github.com/user-attachments/assets/1d1827fe-a192-4312-a5c5-dbfc51594bd0" />
+
+<img width="1250" height="36" alt="cloudformation_ecs" src="https://github.com/user-attachments/assets/03f5a40e-0caf-469b-a220-61cf881d4867" />
+
+#### S3
+
+<img width="1919" height="588" alt="s3_bucket" src="https://github.com/user-attachments/assets/87099898-446d-453c-b56f-709ce99063da" />
+
+#### Glue
+
+<img width="1529" height="107" alt="glue_databases" src="https://github.com/user-attachments/assets/8b477a0a-70bc-49b7-881d-dd2a4056b464" />
+
+#### ECR
+
+<img width="1919" height="951" alt="ecr_image" src="https://github.com/user-attachments/assets/3cbf4fdb-ed0b-47fd-b813-42f9ceac56d6" />
+
+#### ECS
+
+<img width="1908" height="689" alt="ecs_service_running" src="https://github.com/user-attachments/assets/42c53402-f6d6-42cb-9052-3a79f896da54" />
+
+#### RDS
+
+<img width="1919" height="752" alt="rds_available" src="https://github.com/user-attachments/assets/9ca93eb4-2d1e-44f4-8e02-73e3b1e4b263" />
+
+---
+
