@@ -1,8 +1,10 @@
+# Stack base del proyecto: bucket, bases de Glue y repositorio ECR.
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   Foundation stack for forecasting-data-product.
   Creates the data lake bucket, Glue Catalog databases and ECR repository.
 
+# Parámetros configurables al crear el stack.
 Parameters:
 
   ProjectName:
@@ -24,12 +26,14 @@ Parameters:
     Description: >
       Set to false if the bucket already exists and was created manually.
 
+# Condición para crear el bucket solo si se solicita.
 Conditions:
 
   ShouldCreateDataBucket: !Equals [!Ref CreateDataBucket, 'true']
 
 Resources:
 
+  # Bucket principal del data lake.
   DataBucket:
     Type: AWS::S3::Bucket
     Condition: ShouldCreateDataBucket
@@ -54,6 +58,7 @@ Resources:
         - Key: Layer
           Value: data-lake
 
+  # Base de datos Glue para la capa Bronze.
   BronzeDatabase:
     Type: AWS::Glue::Database
     Properties:
@@ -62,6 +67,7 @@ Resources:
         Name: forecasting_bronze
         Description: Bronze layer for raw 1C forecasting datasets.
 
+  # Base de datos Glue para la capa Silver.
   SilverDatabase:
     Type: AWS::Glue::Database
     Properties:
@@ -70,6 +76,7 @@ Resources:
         Name: forecasting_silver
         Description: Silver layer for cleaned and aggregated forecasting datasets.
 
+  # Base de datos Glue para la capa Gold.
   GoldDatabase:
     Type: AWS::Glue::Database
     Properties:
@@ -78,6 +85,7 @@ Resources:
         Name: forecasting_gold
         Description: Gold layer for analytics-ready forecasting datasets.
 
+  # Repositorio ECR para la imagen Docker de Streamlit.
   StreamlitECRRepository:
     Type: AWS::ECR::Repository
     Properties:
@@ -88,6 +96,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+# Valores que devuelve CloudFormation al terminar.
 Outputs:
 
   DataBucketName:
@@ -109,4 +118,3 @@ Outputs:
   StreamlitECRRepositoryUri:
     Description: ECR repository URI for the future Streamlit app image.
     Value: !GetAtt StreamlitECRRepository.RepositoryUri
-

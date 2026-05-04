@@ -1,0 +1,295 @@
+# CloudFormation template para desplegar la app Streamlit en ECS Fargate.
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ECS Fargate deployment for forecasting-data-product Streamlit app.
+
+# Parámetros configurables al momento de crear el stack.
+Parameters:
+
+  ProjectName:
+    Type: String
+    Default: forecasting-data-product
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where ECS and ALB will be deployed.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id
+    Description: Public subnets for the ALB and ECS tasks.
+
+  ImageUri:
+    Type: String
+    Description: Full ECR image URI for the Streamlit app.
+
+  DataBucketName:
+    Type: String
+    Default: forecasting-data-product
+
+  GoldDatabase:
+    Type: String
+    Default: forecasting_gold
+
+  RdsEndpoint:
+    Type: String
+    Description: RDS endpoint used by the Streamlit app.
+
+  RdsSecretName:
+    Type: String
+    Default: itam/rds/forecasting/credentials
+
+  ContainerPort:
+    Type: Number
+    Default: 8501
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+
+# Recursos AWS necesarios para publicar la app.
+Resources:
+
+  # Cluster donde correrá el servicio ECS.
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${ProjectName}-cluster'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Grupo de logs para centralizar la salida del contenedor.
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${ProjectName}-streamlit'
+      RetentionInDays: 7
+
+  # Security group público para el Application Load Balancer.
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP access to Streamlit ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Public HTTP
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Security group privado para permitir tráfico del ALB hacia Streamlit.
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Streamlit ECS task access from ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+          Description: Streamlit access from ALB
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Load balancer público que expone la app.
+  AppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${ProjectName}-alb'
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Subnets: !Ref SubnetIds
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Target group que apunta a las tareas Fargate.
+  AppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${ProjectName}-tg'
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: !Ref ContainerPort
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /_stcore/health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200-399
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Listener HTTP que redirige tráfico al target group.
+  AppListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref AppLoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTargetGroup
+
+  # Rol usado por ECS para descargar la imagen y escribir logs.
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Rol usado por la aplicación para leer S3, Glue y Secrets Manager.
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StreamlitAppDataAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadForecastingBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${DataBucketName}'
+                  - !Sub 'arn:aws:s3:::${DataBucketName}/*'
+
+              - Sid: ReadGlueCatalog
+                Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetDatabases
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartition
+                  - glue:GetPartitions
+                Resource: '*'
+
+              - Sid: ReadRdsSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${RdsSecretName}*'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Definición de la tarea Fargate que ejecuta el contenedor Streamlit.
+  AppTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ProjectName}-streamlit'
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: '512'
+      Memory: '1024'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: streamlit
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Environment:
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AWS::Region
+            - Name: GOLD_DATABASE
+              Value: !Ref GoldDatabase
+            - Name: RDS_ENDPOINT
+              Value: !Ref RdsEndpoint
+            - Name: RDS_SECRET_NAME
+              Value: !Ref RdsSecretName
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AppLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: streamlit
+
+  # Servicio ECS que mantiene corriendo la app detrás del load balancer.
+  AppService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - AppListener
+    Properties:
+      ServiceName: !Sub '${ProjectName}-streamlit-service'
+      Cluster: !Ref EcsCluster
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref AppTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref AppSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: streamlit
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref AppTargetGroup
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+# Valores útiles que devuelve CloudFormation al terminar el despliegue.
+Outputs:
+
+  ClusterName:
+    Description: ECS cluster name.
+    Value: !Ref EcsCluster
+
+  ServiceName:
+    Description: ECS service name.
+    Value: !GetAtt AppService.Name
+
+  LoadBalancerDNS:
+    Description: Public URL for the Streamlit app.
+    Value: !Sub 'http://${AppLoadBalancer.DNSName}'
+
+  TaskDefinitionArn:
+    Description: ECS task definition ARN.
+    Value: !Ref AppTaskDefinition

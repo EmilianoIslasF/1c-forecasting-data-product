@@ -78,3 +78,13 @@ credentials
 Thumbs.db
 .vscode/
 .idea/
+kaggle.json
+.kaggle/
+
+# Model artifacts
+artifacts/
+*.joblib
+*.pkl
+
+# Local data
+data/
