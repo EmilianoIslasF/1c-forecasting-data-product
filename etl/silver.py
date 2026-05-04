@@ -1,3 +1,4 @@
+# ETL Silver: limpia datos Bronze y construye tablas curadas para modelado.
 from __future__ import annotations
 
 import argparse
@@ -12,6 +13,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def configure_logging() -> None:
+    # Configura logs para monitorear la ejecución del ETL.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -19,6 +21,7 @@ def configure_logging() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    # Define argumentos para ejecutar el script desde terminal.
     parser = argparse.ArgumentParser(
         description="Silver ETL for forecasting-data-product."
     )
@@ -51,6 +54,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_bronze_table(database: str, table: str) -> pd.DataFrame:
+    # Lee una tabla Bronze desde Glue/S3.
     LOGGER.info("Reading Bronze table: %s.%s", database, table)
 
     path = wr.catalog.get_table_location(
@@ -74,6 +78,7 @@ def read_bronze_table(database: str, table: str) -> pd.DataFrame:
 
 
 def clean_sales_train(df: pd.DataFrame) -> pd.DataFrame:
+    # Limpia la tabla diaria de ventas.
     LOGGER.info("Cleaning sales_train")
 
     required_columns = [
@@ -135,6 +140,7 @@ def clean_sales_train(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_sales_monthly(sales: pd.DataFrame) -> pd.DataFrame:
+    # Agrega ventas diarias a nivel tienda-producto-mes.
     LOGGER.info("Building sales_monthly")
 
     sales_monthly = (
@@ -184,6 +190,7 @@ def build_item_catalog(
     items: pd.DataFrame,
     item_categories: pd.DataFrame,
 ) -> pd.DataFrame:
+    # Construye catálogo de productos con categoría.
     LOGGER.info("Building item_catalog")
 
     items = items.copy()
@@ -241,6 +248,7 @@ def build_item_catalog(
 
 
 def build_shop_catalog(shops: pd.DataFrame) -> pd.DataFrame:
+    # Construye catálogo de tiendas.
     LOGGER.info("Building shop_catalog")
 
     required_columns = ["shop_id", "shop_name"]
@@ -271,6 +279,7 @@ def build_sales_monthly_enriched(
     item_catalog: pd.DataFrame,
     shop_catalog: pd.DataFrame,
 ) -> pd.DataFrame:
+    # Enriquece ventas mensuales con catálogos de producto y tienda.
     LOGGER.info("Building sales_monthly_enriched")
 
     enriched = sales_monthly.merge(
@@ -296,6 +305,7 @@ def build_forecast_input(
     item_catalog: pd.DataFrame,
     shop_catalog: pd.DataFrame,
 ) -> pd.DataFrame:
+    # Construye la tabla base para generar predicciones.
     LOGGER.info("Building forecast_input")
 
     required_columns = ["id", "shop_id", "item_id"]
@@ -361,6 +371,7 @@ def write_silver_table(
     table_name: str,
     partition_cols: list[str] | None = None,
 ) -> None:
+    # Escribe una tabla Silver en S3 y la registra en Glue.
     path = f"s3://{bucket}/{silver_prefix}/{table_name}/"
 
     LOGGER.info("Deleting Glue table if it already exists: %s.%s", database, table_name)
@@ -394,6 +405,7 @@ def run_silver_etl(
     silver_database: str,
     silver_prefix: str,
 ) -> None:
+    # Orquesta el flujo completo de la capa Silver.
     LOGGER.info("Creating Glue database if needed: %s", silver_database)
 
     wr.catalog.create_database(
@@ -473,6 +485,7 @@ def run_silver_etl(
 
 
 def main() -> None:
+    # Punto de entrada del script.
     configure_logging()
     args = parse_args()
 

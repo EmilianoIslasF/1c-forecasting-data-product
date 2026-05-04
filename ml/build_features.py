@@ -1,3 +1,4 @@
+# Construye features de ML a partir de tablas Silver y las guarda en la capa ML.
 from __future__ import annotations
 
 import argparse
@@ -11,6 +12,7 @@ import awswrangler as wr
 
 LOGGER = logging.getLogger(__name__)
 
+# Configuración base de la variable objetivo y lags.
 TARGET_COL = "item_cnt_month"
 LAGS = [1, 2, 3, 6, 12]
 CLIP_MIN = 0
@@ -18,6 +20,7 @@ CLIP_MAX = 20
 
 
 def configure_logging() -> None:
+    # Configura logs para monitorear la ejecución del feature build.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -25,6 +28,7 @@ def configure_logging() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    # Define argumentos para ejecutar el script desde terminal.
     parser = argparse.ArgumentParser(
         description="Build ML features using the original Task 01 feature logic."
     )
@@ -38,6 +42,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_silver_table(database: str, table: str) -> pd.DataFrame:
+    # Lee una tabla Silver desde Glue/S3.
     LOGGER.info("Reading Silver table: %s.%s", database, table)
 
     df = wr.s3.read_parquet_table(
@@ -59,6 +64,7 @@ def read_silver_table(database: str, table: str) -> pd.DataFrame:
 
 
 def prepare_monthly(sales_monthly: pd.DataFrame) -> pd.DataFrame:
+    # Prepara la tabla mensual con la variable objetivo.
     LOGGER.info("Preparing monthly target")
 
     required = [
@@ -122,6 +128,7 @@ def prepare_monthly(sales_monthly: pd.DataFrame) -> pd.DataFrame:
 
 
 def prepare_item_metadata(item_catalog: pd.DataFrame) -> pd.DataFrame:
+    # Prepara metadata de productos y categorías.
     LOGGER.info("Preparing item metadata")
 
     required = [
@@ -174,6 +181,7 @@ def prepare_item_metadata(item_catalog: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_train_matrix(monthly: pd.DataFrame) -> pd.DataFrame:
+    # Construye la matriz mensual tienda-producto con ceros.
     LOGGER.info("Building original-style monthly grid with zeros")
 
     grid: list[pd.DataFrame] = []
@@ -223,6 +231,7 @@ def add_category_and_seasonality(
     matrix: pd.DataFrame,
     items: pd.DataFrame,
 ) -> pd.DataFrame:
+    # Agrega categoría, mes y año a la matriz histórica.
     LOGGER.info("Adding item_category_id, month and year")
 
     df = matrix.merge(
@@ -251,6 +260,7 @@ def build_test_matrix(
     forecast_input: pd.DataFrame,
     items: pd.DataFrame,
 ) -> pd.DataFrame:
+    # Construye la matriz del mes de inferencia.
     LOGGER.info("Building test matrix for inference month")
 
     required = [
@@ -323,6 +333,7 @@ def build_test_matrix(
 
 
 def add_target_lags(all_data: pd.DataFrame) -> pd.DataFrame:
+    # Agrega lags de la variable objetivo.
     LOGGER.info("Adding original target lags: %s", LAGS)
 
     df = all_data.sort_values(
@@ -385,6 +396,7 @@ def split_features(
     train_matrix: pd.DataFrame,
     test_matrix: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    # Separa features de entrenamiento, validación e inferencia.
     LOGGER.info("Splitting train, validation and inference")
 
     common_cols = [
@@ -462,6 +474,7 @@ def write_table(
     table_name: str,
     partition_cols: list[str] | None = None,
 ) -> None:
+    # Escribe una tabla de features en S3 y la registra en Glue.
     path = f"s3://{bucket}/{prefix}/{table_name}/"
 
     LOGGER.info("Deleting Glue table if exists: %s.%s", database, table_name)
@@ -543,6 +556,7 @@ def run(
     ml_database: str,
     ml_prefix: str,
 ) -> None:
+    # Orquesta la construcción completa de features.
     wr.catalog.create_database(
         name=ml_database,
         exist_ok=True,
@@ -602,6 +616,7 @@ def run(
 
 
 def main() -> None:
+    # Punto de entrada del script.
     configure_logging()
     args = parse_args()
 

@@ -1,3 +1,4 @@
+# ETL Bronze: descarga datos crudos, valida CSVs y los guarda como tablas Parquet en S3/Glue.
 from __future__ import annotations
 
 import argparse
@@ -16,6 +17,7 @@ import awswrangler as wr
 LOGGER = logging.getLogger(__name__)
 
 
+# Columnas esperadas por archivo/tablas principales.
 EXPECTED_KEYS = {
     "sales_train": [
         "date",
@@ -48,6 +50,7 @@ EXPECTED_KEYS = {
 
 
 def configure_logging() -> None:
+    # Configura logs para monitorear la ejecución del ETL.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -55,6 +58,7 @@ def configure_logging() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    # Define argumentos para ejecutar el script desde terminal.
     parser = argparse.ArgumentParser(
         description="Bronze ETL for forecasting-data-product."
     )
@@ -111,6 +115,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def normalize_name(value: str) -> str:
+    # Estandariza nombres para columnas y tablas.
     value = value.lower().strip()
     value = re.sub(r"[^a-z0-9]+", "_", value)
     value = re.sub(r"_+", "_", value)
@@ -118,10 +123,12 @@ def normalize_name(value: str) -> str:
 
 
 def table_name_from_file(path: Path) -> str:
+    # Crea el nombre de tabla a partir del nombre del archivo.
     return normalize_name(path.stem)
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    # Normaliza columnas y valida que no haya duplicados.
     df = df.copy()
     df.columns = [normalize_name(col) for col in df.columns]
 
@@ -134,17 +141,20 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def validate_bucket_exists(bucket: str) -> None:
+    # Verifica que el bucket de salida exista antes de escribir datos.
     s3 = boto3.client("s3")
     s3.head_bucket(Bucket=bucket)
     LOGGER.info("S3 bucket exists: s3://%s", bucket)
 
 
 def csv_files_exist(data_dir: str) -> bool:
+    # Revisa si ya existen CSVs locales.
     root = Path(data_dir)
     return root.exists() and any(root.rglob("*.csv"))
 
 
 def validate_kaggle_credentials() -> None:
+    # Verifica credenciales para descargar desde Kaggle.
     kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
 
     has_env_credentials = bool(
@@ -166,6 +176,7 @@ def download_kaggle_dataset(
     data_dir: str,
     force_download: bool,
 ) -> None:
+    # Descarga y descomprime el dataset de Kaggle si hace falta.
     root = Path(data_dir)
     root.mkdir(parents=True, exist_ok=True)
 
@@ -222,6 +233,7 @@ def download_kaggle_dataset(
 
 
 def list_csv_files(data_dir: str) -> list[Path]:
+    # Lista todos los archivos CSV que serán cargados a Bronze.
     root = Path(data_dir)
 
     if not root.exists():
@@ -241,6 +253,7 @@ def list_csv_files(data_dir: str) -> list[Path]:
 
 
 def read_csv(path: Path) -> pd.DataFrame:
+    # Lee un CSV local y normaliza sus columnas.
     LOGGER.info("Reading local CSV: %s", path)
 
     df = pd.read_csv(path, low_memory=False)
@@ -257,6 +270,7 @@ def read_csv(path: Path) -> pd.DataFrame:
 
 
 def validate_dataframe(df: pd.DataFrame, table_name: str) -> None:
+    # Valida estructura mínima y columnas clave.
     assert not df.empty, f"{table_name} is empty"
     assert len(df.columns) > 0, f"{table_name} has no columns"
 
@@ -279,6 +293,7 @@ def validate_dataframe(df: pd.DataFrame, table_name: str) -> None:
 
 
 def upload_raw_csv(path: Path, bucket: str, raw_prefix: str) -> str:
+    # Sube el CSV original a la zona raw en S3.
     s3_key = f"{raw_prefix}/{path.name}"
     s3_uri = f"s3://{bucket}/{s3_key}"
 
@@ -297,6 +312,7 @@ def write_bronze_table(
     bronze_prefix: str,
     table_name: str,
 ) -> str:
+    # Escribe la tabla Bronze como Parquet y la registra en Glue.
     path = f"s3://{bucket}/{bronze_prefix}/{table_name}/"
 
     LOGGER.info("Deleting Glue table if it already exists: %s.%s", database, table_name)
@@ -333,6 +349,7 @@ def run_bronze_etl(
     raw_prefix: str,
     bronze_prefix: str,
 ) -> None:
+    # Orquesta el flujo completo de la capa Bronze.
     validate_bucket_exists(bucket)
 
     if skip_download:
@@ -391,6 +408,7 @@ def run_bronze_etl(
 
 
 def main() -> None:
+    # Punto de entrada del script.
     configure_logging()
     args = parse_args()
 

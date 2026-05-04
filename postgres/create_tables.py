@@ -1,3 +1,4 @@
+# Crea las tablas operativas en RDS PostgreSQL para feedback y monitoreo.
 from __future__ import annotations
 
 import argparse
@@ -27,6 +28,7 @@ LOGGER = logging.getLogger(__name__)
 metadata = MetaData()
 
 
+# Tabla para registrar ejecuciones o solicitudes de forecast.
 forecast_jobs = Table(
     "forecast_jobs",
     metadata,
@@ -43,6 +45,7 @@ forecast_jobs = Table(
 )
 
 
+# Tabla para guardar feedback de negocio desde la app.
 business_feedback = Table(
     "business_feedback",
     metadata,
@@ -59,6 +62,7 @@ business_feedback = Table(
 )
 
 
+# Tabla para marcar productos que requieren revisión.
 flagged_products = Table(
     "flagged_products",
     metadata,
@@ -75,6 +79,7 @@ flagged_products = Table(
 )
 
 
+# Tabla para métricas operativas de la app.
 app_metrics = Table(
     "app_metrics",
     metadata,
@@ -88,6 +93,7 @@ app_metrics = Table(
 
 
 def configure_logging() -> None:
+    # Configura logs para monitorear la creación del esquema.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -95,6 +101,7 @@ def configure_logging() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    # Define argumentos para conectarse al RDS desde terminal.
     parser = argparse.ArgumentParser(
         description="Create PostgreSQL operational tables for forecasting-data-product."
     )
@@ -121,6 +128,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def get_secret(secret_name: str, region: str) -> dict:
+    # Recupera credenciales de conexión desde Secrets Manager.
     LOGGER.info("Reading secret from Secrets Manager: %s", secret_name)
 
     client = boto3.client("secretsmanager", region_name=region)
@@ -130,6 +138,7 @@ def get_secret(secret_name: str, region: str) -> dict:
 
 
 def build_connection_url(host: str, creds: dict) -> str:
+    # Construye la URL de conexión para SQLAlchemy.
     username = quote_plus(creds["username"])
     password = quote_plus(creds["password"])
     dbname = creds["dbname"]
@@ -139,6 +148,7 @@ def build_connection_url(host: str, creds: dict) -> str:
 
 
 def main() -> None:
+    # Punto de entrada del script.
     configure_logging()
     args = parse_args()
 

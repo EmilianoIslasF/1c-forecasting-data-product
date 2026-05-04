@@ -1,8 +1,10 @@
+# Stack de RDS: base PostgreSQL, secreto, red y outputs de conexión.
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   RDS PostgreSQL stack for forecasting-data-product.
   Creates PostgreSQL, security group, subnet group and Secrets Manager credentials.
 
+# Parámetros configurables al crear el stack.
 Parameters:
 
   ProjectName:
@@ -43,6 +45,7 @@ Parameters:
 
 Resources:
 
+  # Secreto con credenciales de conexión a PostgreSQL.
   RdsCredentialsSecret:
     Type: AWS::SecretsManager::Secret
     DeletionPolicy: Delete
@@ -62,6 +65,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Security group que permite conexión a PostgreSQL.
   RdsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -77,6 +81,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Grupo de subnets donde se desplegará RDS.
   RdsSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
@@ -86,6 +91,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Instancia PostgreSQL usada por la app para feedback operativo.
   RdsInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Delete
@@ -111,6 +117,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+# Valores útiles para conectar la app y otros procesos al RDS.
 Outputs:
 
   RdsEndpoint:

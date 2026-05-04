@@ -1,3 +1,4 @@
+# App Streamlit para consultar forecasts, métricas y feedback operativo.
 from __future__ import annotations
 
 import json
@@ -12,12 +13,14 @@ import streamlit as st
 from sqlalchemy import create_engine, text
 
 
+# Variables de configuración tomadas del ambiente.
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 GOLD_DATABASE = os.getenv("GOLD_DATABASE", "forecasting_gold")
 RDS_ENDPOINT = os.getenv("RDS_ENDPOINT")
 RDS_SECRET_NAME = os.getenv("RDS_SECRET_NAME", "itam/rds/forecasting/credentials")
 
 
+# Configuración general de la aplicación.
 st.set_page_config(
     page_title="Forecasting Data Product",
     page_icon="📈",
@@ -27,6 +30,7 @@ st.set_page_config(
 
 @st.cache_data(ttl=600)
 def read_gold_table(table_name: str) -> pd.DataFrame:
+    # Lee tablas Gold desde Glue/S3.
     return wr.s3.read_parquet_table(
         database=GOLD_DATABASE,
         table=table_name,
@@ -35,6 +39,7 @@ def read_gold_table(table_name: str) -> pd.DataFrame:
 
 @st.cache_resource
 def get_secret(secret_name: str) -> dict:
+    # Recupera credenciales desde AWS Secrets Manager.
     client = boto3.client("secretsmanager", region_name=AWS_REGION)
     response = client.get_secret_value(SecretId=secret_name)
     return json.loads(response["SecretString"])
@@ -42,6 +47,7 @@ def get_secret(secret_name: str) -> dict:
 
 @st.cache_resource
 def get_engine():
+    # Crea la conexión a RDS si el endpoint está configurado.
     if not RDS_ENDPOINT:
         return None
 
@@ -66,6 +72,7 @@ def insert_feedback(
     severity: str,
     feedback_text: str,
 ) -> None:
+    # Inserta feedback de negocio en RDS.
     engine = get_engine()
 
     if engine is None:
@@ -120,6 +127,7 @@ def insert_flagged_product(
     priority: str,
     notes: str | None,
 ) -> None:
+    # Inserta productos marcados como problemáticos en RDS.
     engine = get_engine()
 
     if engine is None:
@@ -166,6 +174,7 @@ def insert_flagged_product(
 
 
 def read_feedback() -> pd.DataFrame:
+    # Consulta el feedback reciente guardado en RDS.
     engine = get_engine()
 
     if engine is None:
@@ -195,6 +204,7 @@ def read_feedback() -> pd.DataFrame:
 
 
 def read_flagged_products() -> pd.DataFrame:
+    # Consulta productos marcados recientemente.
     engine = get_engine()
 
     if engine is None:
@@ -224,6 +234,7 @@ def read_flagged_products() -> pd.DataFrame:
 
 
 def sidebar_filters(forecast_df: pd.DataFrame) -> tuple[list[str], list[int], list[int]]:
+    # Construye filtros reutilizables para las vistas de forecast.
     st.sidebar.header("Filtros")
 
     categories = sorted(
@@ -258,6 +269,7 @@ def sidebar_filters(forecast_df: pd.DataFrame) -> tuple[list[str], list[int], li
 
 
 def page_overview() -> None:
+    # Página principal con resumen ejecutivo y métricas globales.
     st.title("Forecasting Data Product")
     st.caption("MVP de planeación de demanda mensual para retail.")
 
@@ -422,6 +434,7 @@ def page_overview() -> None:
         )
 
 def page_forecast() -> None:
+    # Página para explorar el pronóstico del siguiente mes.
     st.title("Pronóstico siguiente mes")
     st.caption("Predicción mensual de demanda generada por el modelo final.")
 
@@ -626,6 +639,7 @@ def page_forecast() -> None:
     )
 
 def page_evaluation() -> None:
+    # Página para revisar desempeño del modelo.
     st.title("Evaluación del modelo")
     st.caption("Validación del modelo sobre el último mes histórico disponible.")
 
@@ -757,6 +771,7 @@ def page_evaluation() -> None:
         )
 
 def page_feedback() -> None:
+    # Página para capturar y consultar feedback de negocio.
     st.title("Feedback de negocio")
     st.caption("Captura observaciones del equipo de negocio sobre productos o categorías.")
 
@@ -808,6 +823,7 @@ def page_feedback() -> None:
     else:
         st.dataframe(feedback, use_container_width=True, hide_index=True)
 def page_flagged_products() -> None:
+    # Página para marcar productos que requieren revisión.
     st.title("Productos marcados con problemas")
     st.caption("Lista operacional para que el equipo de ML investigue casos problemáticos.")
 
@@ -865,6 +881,7 @@ def page_flagged_products() -> None:
 
 
 def main() -> None:
+    # Controla la navegación principal de la app.
     st.sidebar.title("Forecasting MVP")
 
     page = st.sidebar.radio(

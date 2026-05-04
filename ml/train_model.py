@@ -1,3 +1,4 @@
+# Entrena el modelo final, evalúa desempeño y escribe resultados en Gold.
 from __future__ import annotations
 
 import argparse
@@ -18,11 +19,13 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 LOGGER = logging.getLogger(__name__)
 
+# Configuración base del target, clipping y reproducibilidad.
 TARGET_COL = "item_cnt_month"
 CLIP_MIN = 0
 CLIP_MAX = 20
 SEED = 42
 
+# Features usadas por el modelo.
 FEATURE_COLUMNS = [
     "date_block_num",
     "shop_id",
@@ -39,6 +42,7 @@ FEATURE_COLUMNS = [
 
 
 def configure_logging() -> None:
+    # Configura logs para monitorear el entrenamiento.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -46,6 +50,7 @@ def configure_logging() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    # Define argumentos para ejecutar el script desde terminal.
     parser = argparse.ArgumentParser(
         description="Train original GradientBoostingRegressor model and write outputs to Gold."
     )
@@ -67,6 +72,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_table(database: str, table: str) -> pd.DataFrame:
+    # Lee una tabla desde Glue/S3.
     LOGGER.info("Reading table: %s.%s", database, table)
 
     df = wr.s3.read_parquet_table(
@@ -92,6 +98,7 @@ def prepare_xy(
     table_name: str,
     require_target: bool,
 ) -> tuple[pd.DataFrame, pd.Series | None]:
+    # Separa features y target para entrenamiento o inferencia.
     missing = [col for col in FEATURE_COLUMNS if col not in df.columns]
     assert not missing, f"{table_name} missing features: {missing}"
 
@@ -116,6 +123,7 @@ def train_ridge(
     y_train: pd.Series,
     alpha: float,
 ) -> Ridge:
+    # Entrena un baseline Ridge.
     model = Ridge(alpha=alpha)
     model.fit(x_train, y_train)
     return model
@@ -129,6 +137,7 @@ def train_gbr(
     max_depth: int,
     seed: int,
 ) -> GradientBoostingRegressor:
+    # Entrena el modelo principal Gradient Boosting.
     model = GradientBoostingRegressor(
         n_estimators=n_estimators,
         learning_rate=learning_rate,
@@ -142,12 +151,14 @@ def train_gbr(
 
 
 def predict_clipped(model: Any, x: pd.DataFrame) -> np.ndarray:
+    # Genera predicciones restringidas al rango del target.
     preds = model.predict(x)
     preds = np.clip(preds, CLIP_MIN, CLIP_MAX)
     return preds
 
 
 def compute_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float | None]:
+    # Calcula métricas principales de evaluación.
     y_pred = np.clip(y_pred, CLIP_MIN, CLIP_MAX)
 
     rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
@@ -174,6 +185,7 @@ def build_model_evaluation(
     validation: pd.DataFrame,
     model_predictions: np.ndarray,
 ) -> pd.DataFrame:
+    # Construye tabla de evaluación a nivel tienda-producto.
     LOGGER.info("Building model_evaluation")
 
     evaluation = validation.copy()
@@ -237,6 +249,7 @@ def build_model_evaluation(
 
 
 def build_model_metrics_global(evaluation: pd.DataFrame) -> pd.DataFrame:
+    # Calcula métricas globales del modelo y baseline.
     LOGGER.info("Building model_metrics_global")
 
     actual = evaluation["actual_item_cnt_month"]
@@ -272,6 +285,7 @@ def build_model_metrics_global(evaluation: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_model_metrics_by_category(evaluation: pd.DataFrame) -> pd.DataFrame:
+    # Calcula métricas agregadas por categoría.
     LOGGER.info("Building model_metrics_by_category")
 
     metrics = (
@@ -310,6 +324,7 @@ def build_model_forecast_next_month(
     inference: pd.DataFrame,
     model_predictions: np.ndarray,
 ) -> pd.DataFrame:
+    # Construye tabla final de pronóstico para el siguiente mes.
     LOGGER.info("Building model_forecast_next_month")
 
     forecast = inference.copy()
@@ -397,6 +412,7 @@ def write_gold_table(
     table_name: str,
     partition_cols: list[str] | None = None,
 ) -> None:
+    # Escribe una tabla Gold en S3 y la registra en Glue.
     path = f"s3://{bucket}/{gold_prefix}/{table_name}/"
 
     LOGGER.info("Deleting Gold table if exists: %s.%s", database, table_name)
@@ -433,6 +449,7 @@ def save_artifacts(
     local_model_dir: str,
     model_params: dict[str, Any],
 ) -> None:
+    # Guarda modelo entrenado y métricas como artefactos locales y en S3.
     LOGGER.info("Saving model artifacts")
 
     local_dir = Path(local_model_dir)
@@ -482,6 +499,7 @@ def run(
     max_depth: int,
     seed: int,
 ) -> None:
+    # Orquesta entrenamiento, evaluación, forecast y guardado de artefactos.
     wr.catalog.create_database(
         name=gold_database,
         exist_ok=True,
@@ -624,6 +642,7 @@ def run(
 
 
 def main() -> None:
+    # Punto de entrada del script.
     configure_logging()
     args = parse_args()
 

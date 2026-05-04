@@ -1,7 +1,9 @@
+# CloudFormation template para desplegar la app Streamlit en ECS Fargate.
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   ECS Fargate deployment for forecasting-data-product Streamlit app.
 
+# Parámetros configurables al momento de crear el stack.
 Parameters:
 
   ProjectName:
@@ -13,7 +15,7 @@ Parameters:
     Description: VPC where ECS and ALB will be deployed.
 
   SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
+    Type: List<AWS::EC2::Subnet::Id
     Description: Public subnets for the ALB and ECS tasks.
 
   ImageUri:
@@ -44,8 +46,10 @@ Parameters:
     Type: Number
     Default: 1
 
+# Recursos AWS necesarios para publicar la app.
 Resources:
 
+  # Cluster donde correrá el servicio ECS.
   EcsCluster:
     Type: AWS::ECS::Cluster
     Properties:
@@ -54,12 +58,14 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Grupo de logs para centralizar la salida del contenedor.
   AppLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/ecs/${ProjectName}-streamlit'
       RetentionInDays: 7
 
+  # Security group público para el Application Load Balancer.
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -78,6 +84,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Security group privado para permitir tráfico del ALB hacia Streamlit.
   AppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -96,6 +103,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Load balancer público que expone la app.
   AppLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -110,6 +118,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Target group que apunta a las tareas Fargate.
   AppTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -131,6 +140,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Listener HTTP que redirige tráfico al target group.
   AppListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -141,6 +151,7 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref AppTargetGroup
 
+  # Rol usado por ECS para descargar la imagen y escribir logs.
   TaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -157,6 +168,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Rol usado por la aplicación para leer S3, Glue y Secrets Manager.
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -201,6 +213,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+  # Definición de la tarea Fargate que ejecuta el contenedor Streamlit.
   AppTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -237,6 +250,7 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: streamlit
 
+  # Servicio ECS que mantiene corriendo la app detrás del load balancer.
   AppService:
     Type: AWS::ECS::Service
     DependsOn:
@@ -261,6 +275,7 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
 
+# Valores útiles que devuelve CloudFormation al terminar el despliegue.
 Outputs:
 
   ClusterName:

@@ -1,3 +1,4 @@
+# ETL Gold: construye tablas analíticas y métricas para consumo del dashboard.
 from __future__ import annotations
 
 import argparse
@@ -12,6 +13,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def configure_logging() -> None:
+    # Configura logs para monitorear la ejecución del ETL.
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(message)s",
@@ -19,6 +21,7 @@ def configure_logging() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    # Define argumentos para ejecutar el script desde terminal.
     parser = argparse.ArgumentParser(
         description="Gold ETL for forecasting-data-product."
     )
@@ -51,6 +54,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_table(database: str, table: str) -> pd.DataFrame:
+    # Lee una tabla desde Glue/S3 y valida que tenga datos.
     LOGGER.info("Reading table: %s.%s", database, table)
 
     df = wr.s3.read_parquet_table(
@@ -85,6 +89,7 @@ def read_table(database: str, table: str) -> pd.DataFrame:
 
 
 def build_demand_history(sales_monthly_enriched: pd.DataFrame) -> pd.DataFrame:
+    # Construye la tabla histórica granular de demanda.
     LOGGER.info("Building demand_history")
 
     required_columns = [
@@ -123,6 +128,7 @@ def build_demand_history(sales_monthly_enriched: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_category_monthly(demand_history: pd.DataFrame) -> pd.DataFrame:
+    # Agrega la demanda mensual a nivel categoría.
     LOGGER.info("Building category_monthly")
 
     category_monthly = (
@@ -157,6 +163,7 @@ def build_category_monthly(demand_history: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_shop_monthly(demand_history: pd.DataFrame) -> pd.DataFrame:
+    # Agrega la demanda mensual a nivel tienda.
     LOGGER.info("Building shop_monthly")
 
     shop_monthly = (
@@ -191,6 +198,7 @@ def build_shop_monthly(demand_history: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_product_kpis(demand_history: pd.DataFrame) -> pd.DataFrame:
+    # Calcula KPIs históricos por producto.
     LOGGER.info("Building product_kpis")
 
     product_kpis = (
@@ -231,6 +239,7 @@ def build_baseline_forecast_next_month(
     forecast_input: pd.DataFrame,
     sales_monthly: pd.DataFrame,
 ) -> pd.DataFrame:
+    # Construye un forecast baseline usando demanda reciente.
     LOGGER.info("Building baseline_forecast_next_month")
 
     required_forecast_cols = [
@@ -327,6 +336,7 @@ def build_baseline_evaluation(
     item_catalog: pd.DataFrame,
     shop_catalog: pd.DataFrame,
 ) -> pd.DataFrame:
+    # Evalúa el baseline contra el último mes histórico.
     LOGGER.info("Building baseline_evaluation")
 
     validation_month = int(sales_monthly["date_block_num"].max())
@@ -397,6 +407,7 @@ def build_baseline_evaluation(
 
 
 def build_baseline_metrics_global(evaluation: pd.DataFrame) -> pd.DataFrame:
+    # Calcula métricas globales del baseline.
     LOGGER.info("Building baseline_metrics_global")
 
     metrics = pd.DataFrame(
@@ -425,6 +436,7 @@ def build_baseline_metrics_global(evaluation: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_baseline_metrics_by_category(evaluation: pd.DataFrame) -> pd.DataFrame:
+    # Calcula métricas del baseline por categoría.
     LOGGER.info("Building baseline_metrics_by_category")
 
     metrics = (
@@ -465,6 +477,7 @@ def write_gold_table(
     table_name: str,
     partition_cols: list[str] | None = None,
 ) -> None:
+    # Escribe una tabla Gold en S3 y la registra en Glue.
     path = f"s3://{bucket}/{gold_prefix}/{table_name}/"
 
     LOGGER.info("Deleting Glue table if it already exists: %s.%s", database, table_name)
@@ -498,6 +511,7 @@ def run_gold_etl(
     gold_database: str,
     gold_prefix: str,
 ) -> None:
+    # Orquesta el flujo completo de la capa Gold.
     LOGGER.info("Creating Glue database if needed: %s", gold_database)
 
     wr.catalog.create_database(
@@ -608,6 +622,7 @@ def run_gold_etl(
 
 
 def main() -> None:
+    # Punto de entrada del script.
     configure_logging()
     args = parse_args()
 
