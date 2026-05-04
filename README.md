@@ -21,6 +21,11 @@ La app permite:
 
 ---
 
+## Link del Video Demo
+https://drive.google.com/file/d/1EieRK_66UXfxEPdCpZ7bZcvz2m6NhkJM/view?usp=share_link
+
+---
+
 ## Problema de negocio
 
 El objetivo es apoyar la planeación de demanda mensual a nivel tienda-producto usando datos históricos de ventas.
