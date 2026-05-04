@@ -523,6 +523,16 @@ https://<studio-domain>.studio.us-east-1.sagemaker.aws/jupyterlab/default/proxy/
 - Agregar CI/CD para Docker y ECS.
 
 ---
+## Uso de herramientas de IA
 
+Durante el desarrollo del proyecto se utilizó asistencia de IA (OpenAI - ChatGptPlus) para acelerar y ordenar el trabajo técnico. En particular, se usó para:
 
+- Generar y depurar scripts de ETL para Bronze, Silver y Gold.
+- Apoyar la construcción del pipeline de Machine Learning.
+- Iterar la aplicación Streamlit y mejorar la narrativa ejecutiva.
+- Redactar y estructurar documentación técnica del proyecto.
+
+Todas las decisiones finales, ejecuciones, validaciones y despliegues fueron verificadas manualmente mediante outputs de terminal, AWS Console, Glue/Athena, RDS y la app pública desplegada.
+
+---
 
