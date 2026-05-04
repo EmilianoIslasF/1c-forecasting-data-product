@@ -502,4 +502,27 @@ https://<studio-domain>.studio.us-east-1.sagemaker.aws/jupyterlab/default/proxy/
 <img width="1919" height="752" alt="rds_available" src="https://github.com/user-attachments/assets/9ca93eb4-2d1e-44f4-8e02-73e3b1e4b263" />
 
 ---
+## Limitaciones
+
+- El modelo predice demanda esperada mensual, no órdenes finales de inventario.
+- Predicciones menores a 1 son normales en productos de baja rotación.
+- RDS se usa solo para feedback operacional.
+- El modelo corre offline/batch.
+- La app pública no tiene autenticación.
+- No se implementaron intervalos de confianza.
+
+---
+
+## Próximos pasos
+
+- Agregar autenticación a la app.
+- Automatizar el pipeline completo.
+- Agregar monitoreo de drift y desempeño del modelo.
+- Convertir pronósticos en recomendaciones de inventario.
+- Incluir promociones, precios y eventos externos.
+- Agregar CI/CD para Docker y ECS.
+
+---
+
+
 
